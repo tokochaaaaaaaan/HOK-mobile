@@ -1,0 +1,33 @@
+{
+  "name": "hok",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@hello-pangea/dnd": "^18.0.1",
+    "firebase": "^11.6.0",
+    "nanoid": "^5.1.5",
+    "next": "15.3.1",
+    "pdfjs-dist": "^5.1.91",
+    "react": "^19.0.0",
+    "react-dnd": "^16.0.1",
+    "react-dnd-html5-backend": "^16.0.1",
+    "react-dom": "^19.0.0",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@types/node": "^20",
+    "@types/pdfjs-dist": "^2.10.377",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "15.3.1",
+    "typescript": "^5"
+  }
+}
