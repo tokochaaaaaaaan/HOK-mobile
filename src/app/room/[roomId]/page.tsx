@@ -1,3 +1,4 @@
+// src/app/room/[roomId]/page.tsx
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -12,6 +13,7 @@ export default function RoomPage() {
   const { userName } = useUser();
   const [roomData, setRoomData] = useState<any>(null);
 
+  // Firestore の room ドキュメントをリアルタイム購読
   useEffect(() => {
     if (!roomId) return;
     const roomRef = doc(db, "rooms", roomId);
@@ -22,28 +24,31 @@ export default function RoomPage() {
     return () => unsub();
   }, [roomId]);
 
+  // gameStarted が true になったら play ページへ遷移
   useEffect(() => {
     if (roomData?.gameStarted) {
       router.push(`/room/${roomId}/play`);
     }
-  }, [roomData, roomId]);
+  }, [roomData, roomId, router]);
 
+  // ゲストがまだ参加していない場合は開始させない
+  const handleStartGame = async () => {
+    const participants = roomData?.participants || {};
+    const count = Object.keys(participants).length;
 
-const handleStartGame = async () => {
-  const roomRef = doc(db, "rooms", roomId);
+    if (count < 2) {
+      alert("ゲストが参加していないため、開始できません");
+      return;
+    }
 
-  // 現在の参加者数を取得
-  const participants = roomData?.participants || {};
-  const count = Object.keys(participants).length;
+    const roomRef = doc(db, "rooms", roomId);
+    await updateDoc(roomRef, {
+      gameStarted: true,
+      expectedCount: count,
+    });
+  };
 
-  // gameStarted と expectedCount を同時に保存
-  await updateDoc(roomRef, {
-    gameStarted: true,
-    expectedCount: count,
-  });
-};
-
-
+  // 初回ロード時に自動参加処理
   useEffect(() => {
     const joinRoom = async () => {
       if (!roomId || !userName) return;
@@ -86,22 +91,29 @@ const handleStartGame = async () => {
       }}
     >
       <div style={{ marginBottom: 24 }}>
-        <strong>ユーザ名:</strong> {userName}<br />
+        <strong>ユーザ名:</strong> {userName}
+        <br />
         <strong>ルームID:</strong> {roomId}
       </div>
 
       {roomData && (
         <>
           <div style={{ marginBottom: 16 }}>
-            <strong>参加者（{Object.keys(roomData.participants || {}).length}/4）</strong>
+            <strong>
+              参加者（{Object.keys(roomData.participants || {}).length}/4）
+            </strong>
             <ul style={{ listStyle: "none", padding: 0 }}>
-              {Object.values(roomData.participants || {}).map((name: string, i: number) => (
-                <li key={i} style={{ fontSize: 22 }}>{name}</li>
-              ))}
+              {Object.values(roomData.participants || {}).map(
+                (name: string, i: number) => (
+                  <li key={i} style={{ fontSize: 22 }}>
+                    {name}
+                  </li>
+                )
+              )}
             </ul>
           </div>
 
-          {roomData?.host === userName && (
+          {roomData.host === userName && (
             <button
               onClick={handleStartGame}
               style={{
@@ -112,7 +124,7 @@ const handleStartGame = async () => {
                 color: "#fff",
                 border: "none",
                 borderRadius: 10,
-                cursor: "pointer"
+                cursor: "pointer",
               }}
             >
               ゲーム開始！

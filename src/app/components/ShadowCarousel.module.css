@@ -1,0 +1,60 @@
+.wrapper {
+  position: relative;
+  width: 100%;
+  height: 180px;
+  perspective: 1000px;
+  overflow: hidden;
+  margin: 2rem 0;
+  touch-action: pan-y;
+}
+
+.carousel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform-style: preserve-3d;
+  transform: translate(-50%, -50%) translateZ(-160px) rotateY(0deg);
+  transition: transform 0.5s ease;
+}
+
+.card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100px;
+  height: 140px;
+  transform-origin: center center;
+  backface-visibility: hidden;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  overflow: hidden;
+  cursor: grab;
+  transition: transform 0.5s ease;
+}
+
+.card:active {
+  cursor: grabbing;
+}
+
+/* 中央に来たカードだけに枠をつける */
+.activeCard {
+  border: 4px solid #f48fb1;
+  border-radius: 6px;
+  z-index: 2;  /* 少し前面に */
+}
+
+.centerZone {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100px;
+  height: 140px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

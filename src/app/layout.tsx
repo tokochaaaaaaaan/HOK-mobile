@@ -2,19 +2,25 @@
 import "./globals.css";
 import { ReactNode } from "react";
 import { UserProvider } from "@/context/UserContext";
+import styles from "./layout.module.css";  // 追加
 
 export const metadata = {
   title: "Hang Out King",
   description: "グループ旅行計画サポート",
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
   return (
     <html lang="ja">
-      <body>
-        {/* ← ここで UserProvider でアプリ全体を包む */}
+      <body className={styles.body}>
         <UserProvider>
-          {children}    {/* これが各ページ (HomePage, RoomPage, MyCardsPage など) */}
+          <div className={styles.container}>
+            {children}
+          </div>
         </UserProvider>
       </body>
     </html>
