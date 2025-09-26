@@ -4,75 +4,115 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useUser } from "@/context/UserContext";
-import { doc, getDoc, updateDoc, onSnapshot } from "firebase/firestore";
+import { usePreventBack } from "@/hooks/usePreventBack";
+import { doc, getDoc, updateDoc, onSnapshot, runTransaction } from "firebase/firestore";
 import { db } from "../../../../lib/firebase";
 
 export default function RoomPage() {
   const { roomId } = useParams();
   const router = useRouter();
   const { userName } = useUser();
+
+  // ブラウザの戻るボタンを無効化
+  usePreventBack();
+
   const [roomData, setRoomData] = useState<any>(null);
+  const [minStops, setMinStops] = useState<number>(3);
+  const [startPhase, setStartPhase] = useState<"solo" | "discussion">("solo");
 
-  // Firestore の room ドキュメントをリアルタイム購読
+  // ルーム情報のリアルタイム購読（ここで gameStarted も監視します）
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || typeof roomId !== 'string') return;
+    console.log('Setting up room subscription for roomId:', roomId);
     const roomRef = doc(db, "rooms", roomId);
-    const unsub = onSnapshot(roomRef, (docSnap) => {
-      const data = docSnap.data();
-      if (data) setRoomData(data);
-    });
-    return () => unsub();
-  }, [roomId]);
-
-  // gameStarted が true になったら play ページへ遷移
-  useEffect(() => {
-    if (roomData?.gameStarted) {
-      router.push(`/room/${roomId}/play`);
-    }
-  }, [roomData, roomId, router]);
-
-  // ゲストがまだ参加していない場合は開始させない
-  const handleStartGame = async () => {
-    const participants = roomData?.participants || {};
-    const count = Object.keys(participants).length;
-
-    if (count < 2) {
-      alert("ゲストが参加していないため、開始できません");
-      return;
-    }
-
-    const roomRef = doc(db, "rooms", roomId);
-    await updateDoc(roomRef, {
-      gameStarted: true,
-      expectedCount: count,
-    });
-  };
-
-  // 初回ロード時に自動参加処理
-  useEffect(() => {
-    const joinRoom = async () => {
-      if (!roomId || !userName) return;
-      const roomRef = doc(db, "rooms", roomId);
-      const roomSnap = await getDoc(roomRef);
-      if (!roomSnap.exists()) {
-        alert("部屋が存在しません！");
+    const unsub = onSnapshot(roomRef, (snap) => {
+      console.log('Room snapshot received, exists:', snap.exists());
+      if (!snap.exists()) {
+        console.log('Room does not exist');
         return;
       }
-      const room = roomSnap.data();
-      const participants = room.participants || {};
-      const alreadyJoined = Object.values(participants).includes(userName);
-      if (!alreadyJoined) {
-        const newId = crypto.randomUUID();
-        await updateDoc(roomRef, {
-          participants: {
-            ...participants,
-            [newId]: userName,
-          },
-        });
+      const data = snap.data();
+      console.log('Room data:', data);
+      setRoomData(data);
+      // gameStarted フラグが立ったら second ページへ
+      if (data.gameStarted) {
+        router.push(`/room/${roomId}/second`);
       }
-    };
-    joinRoom();
-  }, [roomId, userName]);
+    });
+    return () => unsub();
+  }, [roomId, router]);
+
+  // 初回ロード時に自動参加
+  useEffect(() => {
+    if (!roomId || !userName || typeof roomId !== 'string') return;
+    console.log('Auto-joining room:', roomId, 'as user:', userName);
+    (async () => {
+      try {
+        const ref = doc(db, "rooms", roomId);
+        
+        // トランザクションを使用して安全に参加者を追加
+        await runTransaction(db, async (transaction) => {
+          const snap = await transaction.get(ref);
+          if (!snap.exists()) {
+            console.log('Room does not exist');
+            alert("部屋が存在しません");
+            router.push("/");
+            return;
+          }
+          
+          const data = snap.data();
+          const parts = data.participants || {};
+          console.log('Current participants:', parts);
+          
+          if (!Object.values(parts).includes(userName)) {
+            console.log('User not in room, adding:', userName);
+            const newParticipants = { ...parts, [crypto.randomUUID()]: userName };
+            console.log('New participants:', newParticipants);
+            transaction.update(ref, {
+              participants: newParticipants,
+            });
+            console.log('Successfully added user to room via transaction');
+          } else {
+            console.log('User already in room');
+          }
+        });
+      } catch (error) {
+        console.error('Error joining room:', error);
+        // エラーが発生した場合、少し待ってからリトライ
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      }
+    })();
+  }, [roomId, userName, router]);
+
+  // 「ゲーム開始」クリック時
+  const handleStartGame = async () => {
+    const parts = roomData?.participants || {};
+    const cnt = Object.keys(parts).length;
+    if (cnt < 2) {
+      alert("参加者がまだ揃っていません");
+      return;
+    }
+    if (startPhase === "discussion") {
+      alert("まだ選べません");
+      return;
+    }
+    // Firestore にフラグを書き込む
+    if (!roomId || typeof roomId !== 'string') return;
+    const roomRef = doc(db, "rooms", roomId);
+    await updateDoc(roomRef, {
+      minStops,
+      startPhase,
+      gameStarted: true,
+    });
+    // ホスト自身は即座に second に飛ばす
+    router.push(`/room/${roomId}/second`);
+  };
+
+  if (!roomData) return null;
+
+  const participantCount = Object.keys(roomData.participants || {}).length;
 
   return (
     <div
@@ -83,54 +123,106 @@ export default function RoomPage() {
         transform: "translate(-50%, -50%)",
         backgroundColor: "#fff",
         padding: "32px",
-        border: "2px solid #ccc",
         borderRadius: "12px",
         boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+        width: "360px",
         textAlign: "center",
-        fontSize: 24,
+        fontFamily: "Arial, sans-serif",
       }}
     >
-      <div style={{ marginBottom: 24 }}>
-        <strong>ユーザ名:</strong> {userName}
-        <br />
-        <strong>ルームID:</strong> {roomId}
+      <h2 style={{ marginBottom: "8px" }}>ユーザ名: {userName}</h2>
+      <h3 style={{ marginBottom: "16px", color: "#555" }}>ルームID: {roomId}</h3>
+
+      <div style={{ textAlign: "left", marginBottom: "24px" }}>
+        <strong>参加者（{participantCount}/4）</strong>
+        <ul style={{ listStyle: "none", padding: 0, margin: "8px 0" }}>
+          {Object.values(roomData.participants).map((name: any, i: number) => (
+            <li key={i} style={{ margin: "4px 0" }}>• {name}</li>
+          ))}
+        </ul>
       </div>
 
-      {roomData && (
+      {roomData.host === userName ? (
         <>
-          <div style={{ marginBottom: 16 }}>
-            <strong>
-              参加者（{Object.keys(roomData.participants || {}).length}/4）
-            </strong>
-            <ul style={{ listStyle: "none", padding: 0 }}>
-              {Object.values(roomData.participants || {}).map(
-                (name: string, i: number) => (
-                  <li key={i} style={{ fontSize: 22 }}>
-                    {name}
-                  </li>
-                )
-              )}
-            </ul>
+          {/* 周遊数入力 */}
+          <div style={{ textAlign: "left", marginBottom: "16px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+              周遊数（最小訪問数）：
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={minStops}
+              onChange={e => setMinStops(+e.target.value)}
+              style={{
+                width: "100%",
+                padding: "8px",
+                borderRadius: "4px",
+                border: "1px solid #ccc",
+                boxSizing: "border-box",
+                fontSize: "0.9rem",
+              }}
+            />
           </div>
 
-          {roomData.host === userName && (
-            <button
-              onClick={handleStartGame}
+          {/* フェーズ選択 */}
+          <div style={{ textAlign: "left", marginBottom: "24px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+              どのフェーズから始めますか？
+            </label>
+            <select
+              value={startPhase}
+              onChange={e => setStartPhase(e.target.value as any)}
               style={{
-                marginTop: 24,
-                padding: "16px 32px",
-                fontSize: 20,
-                backgroundColor: "#28a745",
-                color: "#fff",
-                border: "none",
-                borderRadius: 10,
-                cursor: "pointer",
+                width: "100%",
+                padding: "8px",
+                fontSize: "0.9rem",
+                lineHeight: 1.4,
+                borderRadius: "4px",
+                border: "1px solid #ccc",
+                boxSizing: "border-box",
               }}
             >
-              ゲーム開始！
-            </button>
-          )}
+              <option value="solo">1人フェーズ（考えを整理する）</option>
+              <option value="discussion">話し合いフェーズ（議論から始める）</option>
+            </select>
+          </div>
+
+          {/* ゲーム開始ボタン */}
+          <button
+            onClick={handleStartGame}
+            style={{
+              width: "100%",
+              padding: "12px 0",
+              backgroundColor: "#28a745",
+              color: "#fff",
+              fontSize: "1rem",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+            }}
+          >
+            ゲーム開始
+          </button>
         </>
+      ) : (
+        /* ゲスト画面 */
+        <div style={{
+          textAlign: "center",
+          padding: "24px",
+          backgroundColor: "#f8f9fa",
+          borderRadius: "8px",
+          border: "1px solid #e9ecef",
+          color: "#6c757d",
+          fontSize: "1rem",
+          lineHeight: 1.5,
+        }}>
+          📍 ホストが目的地の<br />最低周遊数を決めています
+          <div style={{ marginTop: "8px", fontSize: "0.9rem" }}>
+            しばらくお待ちください...
+          </div>
+        </div>
       )}
     </div>
   );

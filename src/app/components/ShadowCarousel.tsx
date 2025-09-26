@@ -30,6 +30,7 @@ export default function ShadowCarousel({
   const startX = useRef(0);
   const startAngle = useRef(0);
   const [currentIndex, setCurrentIndex] = useState(initialSelectedIndex);
+  const [totalRotation, setTotalRotation] = useState(initialSelectedIndex * angleStep);
 
   // カルーセルの transform を直接操作
   const applyTransform = (angle: number) => {
@@ -41,12 +42,29 @@ export default function ShadowCarousel({
     `;
   };
 
-  // 指定のインデックスへスナップ
+  // 指定のインデックスへスナップ（連続回転対応）
   const rotateToIndex = (idx: number) => {
     const normalized = ((idx % count) + count) % count;
+    const currentNormalized = ((currentIndex % count) + count) % count;
+    
+    // 現在の角度から目標の角度への最短経路を計算
+    let targetAngle = normalized * angleStep;
+    const currentAngle = totalRotation;
+    
+    // 時計回りと反時計回りの距離を計算
+    const clockwiseDistance = ((normalized - currentNormalized + count) % count) * angleStep;
+    const counterClockwiseDistance = ((currentNormalized - normalized + count) % count) * angleStep;
+    
+    // より短い距離の方向を選択
+    if (clockwiseDistance <= counterClockwiseDistance) {
+      targetAngle = currentAngle + clockwiseDistance;
+    } else {
+      targetAngle = currentAngle - counterClockwiseDistance;
+    }
+    
     setCurrentIndex(normalized);
-    const angle = normalized * angleStep;
-    applyTransform(angle);
+    setTotalRotation(targetAngle);
+    applyTransform(targetAngle);
     onSelect(normalized);
   };
 
@@ -55,7 +73,7 @@ export default function ShadowCarousel({
     e.preventDefault();
     setIsDragging(true);
     startX.current = e.clientX;
-    startAngle.current = currentIndex * angleStep;
+    startAngle.current = totalRotation;
     wrapperRef.current?.setPointerCapture(e.pointerId);
   };
 
@@ -65,7 +83,8 @@ export default function ShadowCarousel({
     const dx = e.clientX - startX.current;
     const dragSpeed = 0.5;
     // ドラッグ方向と同じ向きに回転
-    applyTransform(startAngle.current - dx * dragSpeed);
+    const newAngle = startAngle.current - dx * dragSpeed;
+    applyTransform(newAngle);
   };
 
   // ドラッグ終了：最寄りインデックスにスナップ
@@ -77,11 +96,19 @@ export default function ShadowCarousel({
     const dragSpeed = 0.5;
     const finalAngle = startAngle.current - dx * dragSpeed;
     const rawIndex = finalAngle / angleStep;
-    rotateToIndex(Math.round(rawIndex));
+    const nearestIndex = Math.round(rawIndex);
+    
+    // 最も近いインデックスを正規化
+    const normalizedIndex = ((nearestIndex % count) + count) % count;
+    setCurrentIndex(normalizedIndex);
+    setTotalRotation(nearestIndex * angleStep);
+    applyTransform(nearestIndex * angleStep);
+    onSelect(normalizedIndex);
   };
 
   // 初期位置に回転
   useEffect(() => {
+    setTotalRotation(initialSelectedIndex * angleStep);
     rotateToIndex(initialSelectedIndex);
   }, [initialSelectedIndex]);
 

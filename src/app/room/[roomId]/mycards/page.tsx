@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useUser } from "@/context/UserContext";
+import { usePreventBack } from "@/hooks/usePreventBack";
 import { doc, setDoc, onSnapshot, collection } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
 
@@ -10,11 +11,15 @@ export default function MyCardsPage() {
   const router = useRouter();
   const { userName, cardPositions } = useUser();
 
+  // ブラウザの戻るボタンを無効化
+  usePreventBack();
+
   const [expectedCount, setExpectedCount] = useState<number | null>(null);
   const [isWaiting, setIsWaiting] = useState(false);
 
   // 1) OKを押すと自分の結果を送信
   const handleConfirm = async () => {
+    if (!roomId || typeof roomId !== 'string') return;
     const resultRef = doc(
       db,
       "rooms",
@@ -36,6 +41,7 @@ export default function MyCardsPage() {
 
   // 2) room ドキュメントを監視 → expectedCount フィールドを取得
   useEffect(() => {
+    if (!roomId || typeof roomId !== 'string') return;
     const roomRef = doc(db, "rooms", roomId);
     return onSnapshot(roomRef, (snap) => {
       const data = snap.data();
@@ -48,7 +54,7 @@ export default function MyCardsPage() {
 
   // 3) expectedCount 人の ready 完了を待つ
   useEffect(() => {
-    if (!isWaiting || expectedCount == null) return;
+    if (!isWaiting || expectedCount == null || !roomId || typeof roomId !== 'string') return;
     const resultsCol = collection(db, "rooms", roomId, "results");
     return onSnapshot(resultsCol, (snap) => {
       const readyCount = snap.docs.filter(d => d.data().ready).length;

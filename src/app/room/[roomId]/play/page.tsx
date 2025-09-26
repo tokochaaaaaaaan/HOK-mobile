@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useUser } from "@/context/UserContext";
+import { usePreventBack } from "@/hooks/usePreventBack";
 import {
   collection,
   addDoc,
@@ -19,103 +20,162 @@ import styles from "./page.module.css";
 
 type LogEntry = {
   id: string;
+  user: string;
   message: string;
   card: string;
   polarity: number;
-  reason?: string;
 };
+
+// CarouselCard に裏面のパスを紐づける
+type PlayPageCard = CarouselCard & { backSrc: string };
 
 export default function PlayPage() {
   const { roomId } = useParams();
   const router = useRouter();
   const { userName } = useUser();
 
-  // --- 初期カードプール ---
-  const initialCards: CarouselCard[] = Array.from({ length: 10 }, (_, i) => ({
-    id: `card${i + 1}`,
-    src: `/pngs/USJ_${i + 1}_surface-1.png`,
-    title: `カード${i + 1}`,
-  }));
+  // ブラウザの戻るボタン無効化
+  usePreventBack();
 
-  const [cards, setCards] = useState<CarouselCard[]>(initialCards);
+  // 初期カードプール
+  const initialCards: PlayPageCard[] = Array.from({ length: 10 }, (_, i) => {
+    const idx = i + 1;
+    return {
+      id: `card${idx}`,
+      src: `/pngs/USJ_${idx}_surface-1.png`,
+      title: `カード${idx}`,
+      backSrc: `/pngs/back/USJ_${idx}_back-1.png`,
+    };
+  });
+
+  const [cards, setCards] = useState<PlayPageCard[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [polarity, setPolarity] = useState(3);
-  const [reason, setReason] = useState("");
+  // const [polarity, setPolarity] = useState(2); // for future use
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logExpanded, setLogExpanded] = useState(false);
-  const [showAll, setShowAll] = useState(false); // ← 全カードモーダル表示フラグ
+  const [showAll, setShowAll] = useState(false);
+  const [isFlipped, setIsFlipped] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitLockRef = useRef(false);
 
-  // Firestore からログをリアルタイム取得
+  // カードが使い切られたら play2 に飛ばす
   useEffect(() => {
-    if (!roomId) return;
+    if (cards.length === 0 && isInitialized && roomId) {
+      router.push(`/room/${roomId}/play2`);
+    }
+  }, [cards.length, isInitialized, roomId, router]);
+
+  // selectedIndex が範囲外になったら最後に合わせる
+  useEffect(() => {
+    if (selectedIndex >= cards.length && cards.length > 0) {
+      setSelectedIndex(cards.length - 1);
+    }
+    // カードが減ったら必ず表に戻す
+    setIsFlipped(false);
+  }, [cards.length, selectedIndex]);
+
+  // Firestore から自分の移動ログのみをリアルタイム取得 + リロード対応
+  useEffect(() => {
+    if (!roomId || typeof roomId !== 'string' || !userName) return;
+    
     const q = query(
       collection(db, "rooms", roomId, "logs"),
       orderBy("timestamp", "asc")
     );
+    
     const unsub = onSnapshot(q, (snap) => {
-      setLogs(
-        snap.docs.map((d) => {
-          const data = d.data() as any;
-          return {
-            id: d.id,
-            message: data.message,
-            card: data.card,
-            polarity: data.polarity,
-            reason: data.reason,
-          };
-        })
-      );
+      const myLogs = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .filter((l) => l.user === userName);
+      
+      setLogs(myLogs);
+
+      // 初回のみ：ログから使用済みカードを特定して残りカードを設定
+      if (!isInitialized) {
+        const usedCardTitles = new Set(myLogs.map(log => log.card));
+        const remainingCards = initialCards.filter(card => !usedCardTitles.has(card.title));
+        
+        setCards(remainingCards);
+        setIsInitialized(true);
+        
+        console.log(`play: リロード復元完了 - 残りカード数: ${remainingCards.length}, 使用済み: ${usedCardTitles.size}`);
+      }
     });
+    
     return () => unsub();
-  }, [roomId]);
+  }, [roomId, userName, isInitialized, initialCards]);
 
-  // 全カード評価後 自動遷移
-  useEffect(() => {
-    if (cards.length === 0) {
-      router.push(`/room/${roomId}/result`);
+  const currentCard = useMemo(
+    () => cards[selectedIndex] ?? null,
+    [cards, selectedIndex]
+  );
+
+  // カードが１枚もない or currentCard が無効なら何も描かない
+  if (!currentCard) {
+    return null;
+  }
+
+  // 評価を確定してログを追加
+  const handlePolaritySelect = async (selectedPolarity: number) => {
+    if (!roomId || typeof roomId !== 'string') return;
+    if (!currentCard) return;
+    // 二重クリック・連打対策
+    if (submitLockRef.current) return;
+    submitLockRef.current = true;
+    setIsSubmitting(true);
+    
+    const polarityText = {
+      1: "行きたくない",
+      2: "どちらでもいい", 
+      3: "行きたい"
+    }[selectedPolarity];
+
+    // データベース用の分類名
+    const categoryMapping: Record<number, string> = {
+      1: "dont",      // 行きたくない
+      2: "neutral",   // どちらでもいい
+      3: "want"       // 行きたい
+    };
+
+    try {
+      await addDoc(collection(db, "rooms", roomId, "logs"), {
+        user: userName,
+        card: currentCard.title,
+        polarity: selectedPolarity,
+        category: categoryMapping[selectedPolarity], // データベース用の分類を追加
+        timestamp: serverTimestamp(),
+        message: `${userName}が「${currentCard.title}」を${polarityText}に選択`,
+      });
+      // インデックスではなくIDで削除（連打や選択インデックス変化に強い）
+      const removeId = currentCard.id;
+      setCards((prev) => prev.filter((c) => c.id !== removeId));
+    } finally {
+      // ほんの短時間ロックを維持して多重イベントを吸収
+      setTimeout(() => {
+        submitLockRef.current = false;
+      }, 200);
+      setIsSubmitting(false);
     }
-  }, [cards, roomId, router]);
-
-  const currentCard = useMemo(() => cards[selectedIndex], [cards, selectedIndex]);
-
-  // 決定
-  const handleConfirm = async () => {
-    if (!roomId) return;
-    await addDoc(collection(db, "rooms", roomId, "logs"), {
-      user: userName,
-      card: currentCard.title,
-      polarity,
-      reason: polarity === 1 || polarity === 5 ? reason : null,
-      timestamp: serverTimestamp(),
-      message:
-        `${userName} が「${currentCard.title}」を${polarity}で評価` +
-        (polarity === 1 || polarity === 5 ? `（理由: ${reason}）` : ""),
-    });
-    setCards((prev) => prev.filter((_, i) => i !== selectedIndex));
-    setSelectedIndex((i) => (i >= cards.length - 1 ? cards.length - 2 : i));
-    setPolarity(3);
-    setReason("");
+    // setPolarity(2); // for future use
   };
 
-  // 元に戻す
+  // 元に戻す（ログの削除＋カード復活）
   const handleRevert = async (log: LogEntry) => {
-    if (!roomId) return;
+    if (!roomId || typeof roomId !== 'string') return;
     await deleteDoc(doc(db, "rooms", roomId, "logs", log.id));
     setCards((prev) => {
-      if (prev.find((c) => c.title === log.card)) return prev;
+      if (prev.some((c) => c.title === log.card)) return prev;
       const original = initialCards.find((c) => c.title === log.card);
       return original ? [...prev, original] : prev;
     });
   };
 
-  // バー色
-  const polarityColors: Record<number, string> = {
-    1: "#1565c0",
-    2: "#64b5f6",
-    3: "#ccc",
-    4: "#f48fb1",
-    5: "#e53935",
-  };
+  // const polarityColors: Record<number, string> = {
+  //   1: "#64b5f6",
+  //   2: "#ccc",
+  //   3: "#f48fb1",
+  // };
 
   return (
     <div className={styles.wrapper}>
@@ -129,17 +189,35 @@ export default function PlayPage() {
       >
         <h3>移動ログ</h3>
         <ul>
-          {logs.map((log) => (
-            <li key={log.id}>
-              {log.message}{" "}
-              <button
-                className={styles.revertBtn}
-                onClick={() => handleRevert(log)}
-              >
-                元に戻す
-              </button>
-            </li>
-          ))}
+          {logs.map((l) => {
+            const polarityBadgeClass = {
+              1: styles.logBadgeDontWant,
+              2: styles.logBadgeNeutral,
+              3: styles.logBadgeWantToGo,
+            }[l.polarity];
+            
+            const polarityText = {
+              1: "行きたくない",
+              2: "どちらでもいい",
+              3: "行きたい"
+            }[l.polarity];
+
+            return (
+              <li key={l.id}>
+                {l.user}が「{l.card}」を
+                <span className={`${styles.logBadge} ${polarityBadgeClass}`}>
+                  {polarityText}
+                </span>
+                に選択{" "}
+                <button
+                  className={styles.revertBtn}
+                  onClick={() => handleRevert(l)}
+                >
+                  元に戻す
+                </button>
+              </li>
+            );
+          })}
         </ul>
         <button
           className={styles.toggleLogBtn}
@@ -149,52 +227,56 @@ export default function PlayPage() {
         </button>
       </div>
 
-      {/* 大カード ＋ 評価セクション */}
+      {/* 大カード＋評価セクション */}
       <div className={styles.mainCardSection}>
         <div className={styles.cardTitle}>{currentCard.title}</div>
-        <div className={styles.largeCard}>
-          <img src={currentCard.src} alt={currentCard.title} />
+        <div
+          className={`${styles.largeCard} ${
+            isFlipped ? styles.flipped : ""
+          }`}
+          onClick={() => setIsFlipped((f) => !f)}
+        >
+          <img
+            src={isFlipped ? currentCard.backSrc : currentCard.src}
+            alt={currentCard.title}
+          />
         </div>
         <div className={styles.polaritySection}>
-          <input
-            type="range"
-            min={1}
-            max={5}
-            value={polarity}
-            onChange={(e) => setPolarity(+e.target.value)}
-            className={styles.polaritySlider}
-            style={{ background: polarityColors[polarity] }}
-          />
-          <div className={styles.polarityLabels}>
-            <span>1: 特に行きたくない</span>
-            <span>2: 行きたくない</span>
-            <span>3: どちらでも良い</span>
-            <span>4: 行きたい</span>
-            <span>5: 特に行きたい</span>
+          <div className={styles.polarityButtons}>
+            <button 
+              className={`${styles.polarityBtn} ${styles.wantToGo}`}
+              onClick={() => handlePolaritySelect(3)}
+              disabled={isSubmitting}
+            >
+              行きたい
+            </button>
+            <button 
+              className={`${styles.polarityBtn} ${styles.neutral}`}
+              onClick={() => handlePolaritySelect(2)}
+              disabled={isSubmitting}
+            >
+              どちらでもいい
+            </button>
+            <button 
+              className={`${styles.polarityBtn} ${styles.dontWant}`}
+              onClick={() => handlePolaritySelect(1)}
+              disabled={isSubmitting}
+            >
+              行きたくない
+            </button>
           </div>
-          {(polarity === 1 || polarity === 5) && (
-            <textarea
-              className={styles.reason}
-              placeholder="理由を入力"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          )}
-          <button className={styles.confirmBtn} onClick={handleConfirm}>
-            決定
-          </button>
         </div>
       </div>
 
-      {/* ３D カルーセル */}
+      {/* 3Dカルーセル */}
       <ShadowCarousel
         cards={cards}
         radius={200}
         initialSelectedIndex={selectedIndex}
-        onSelect={(idx) => setSelectedIndex(idx)}
+        onSelect={(i) => setSelectedIndex(i)}
       />
 
-      {/* 「すべて見る」リンク */}
+      {/* 「すべて見る」モーダル */}
       <div className={styles.viewAllWrapper}>
         <button
           className={styles.viewAllBtn}
@@ -203,8 +285,6 @@ export default function PlayPage() {
           すべて見る
         </button>
       </div>
-
-      {/* モーダル：全カード一覧 */}
       {showAll && (
         <div
           className={styles.modalOverlay}

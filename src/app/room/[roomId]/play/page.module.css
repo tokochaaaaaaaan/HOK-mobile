@@ -2,7 +2,7 @@
   position: relative;
   width: 100%;
   min-height: 100vh;
-  background: #f5f5f5;
+  background: transparent;
   padding: 1rem;
   box-sizing: border-box;
 }
@@ -97,6 +97,86 @@
   background: #218838;
 }
 
+/* 3つのボタンスタイル */
+.polarityButtons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
+.polarityBtn {
+  width: 140px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  font-weight: bold;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.wantToGo {
+  background: #fce4ec;
+  color: #c2185b;
+  border: 2px solid #e91e63;
+}
+
+.wantToGo:hover {
+  background: #e91e63;
+  color: white;
+}
+
+.neutral {
+  background: #f5f5f5;
+  color: #666;
+  border: 2px solid #ccc;
+}
+
+.neutral:hover {
+  background: #ccc;
+  color: white;
+}
+
+.dontWant {
+  background: #e3f2fd;
+  color: #1976d2;
+  border: 2px solid #2196f3;
+}
+
+.dontWant:hover {
+  background: #2196f3;
+  color: white;
+}
+
+/* ログ内で使用する小さなバッジスタイル */
+.logBadge {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
+.logBadgeWantToGo {
+  background: #fce4ec;
+  color: #c2185b;
+  border: 1px solid #e91e63;
+}
+
+.logBadgeNeutral {
+  background: #f5f5f5;
+  color: #666;
+  border: 1px solid #ccc;
+}
+
+.logBadgeDontWant {
+  background: #e3f2fd;
+  color: #1976d2;
+  border: 1px solid #2196f3;
+}
+
 /* すべて見るリンク */
 .viewAllWrapper {
   text-align: center;
@@ -151,3 +231,46 @@
   margin-top: 4px;
   font-size: 0.8rem;
 }
+/* （既存のルールは省略して、末尾にだけ追加してください） */
+
+.flipContainer {
+  perspective: 1000px;
+  width: 100%;
+  max-width: 280px;   /* 元の .largeCard img と同じ幅 */
+  margin: 0 auto 1rem;
+  cursor: pointer;
+}
+
+.flipCard {
+  position: relative;
+  width: 100%;
+  height: auto;              /* 子の img 高さを尊重 */
+  transition: transform 0.6s ease;
+  transform-style: preserve-3d;
+}
+
+.flipCard.flipped {
+  transform: rotateY(180deg);
+}
+
+.front,
+.back {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  backface-visibility: hidden;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.back {
+  transform: rotateY(180deg);
+}
+/* ページモジュールの末尾に追加 */
+.back .largeCard img {
+  width: 100%;
+  height: auto;
+}
+
+

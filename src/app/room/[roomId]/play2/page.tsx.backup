@@ -1,0 +1,803 @@
+// src/app/room/[roo// アイコンの定義
+const reasonIcons = [
+  { emoji: "🍴", text: "ご当地グルメ" },
+  { emoji: "🎢", text: "スリル" },
+  { emoji: "🏃", text: "体験" },
+  { emoji: "🛍", text: "買い物" },
+  { emoji: "🖼", text: "建築・デザイン" },
+  { emoji: "🏞", text: "景色" },
+  { emoji: "⏱", text: "時間" },
+  { emoji: "💰", text: "コスパ" },
+  { emoji: "🤝", text: "友達と一緒に" },
+  { emoji: "👪", text: "家族向け" },
+  { emoji: "🧘", text: "リラックス" },
+  { emoji: "❗", text: "その他" }
+];.tsx
+"use client";
+
+import React, { useEffect, useState, useMemo } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useUser } from "@/context/UserContext";
+import {
+  doc,
+  onSnapshot,
+  collection,
+  query,
+  where,
+  addDoc,
+  serverTimestamp,
+} from "firebase/firestore";
+import { db } from "../../../../../lib/firebase";
+
+type LogEntry = { id: string; user: string; card: string; polarity: number };
+type CardInfo = { id: string; title: string; src: string; backSrc: string };
+
+// アイコンの定義
+const reasonIcons = [
+  { emoji: "�", text: "ご当地グルメ" },
+  { emoji: "�", text: "スリル" },
+  { emoji: "�", text: "体験" },
+  { emoji: "🛍", text: "買い物" },
+  { emoji: "🖼", text: "建築・デザイン" },
+  { emoji: "🏞", text: "景色" },
+  { emoji: "⏱", text: "時間" },
+  { emoji: "�", text: "コスパ" },
+  { emoji: "🤝", text: "友達と一緒に" },
+  { emoji: "👪", text: "家族向け" },
+  { emoji: "🧘", text: "リラックス" },
+  { emoji: "❗️", text: "その他" }
+];
+
+export default function Play2Page() {
+  const { roomId } = useParams();
+  const router = useRouter();
+  const { userName } = useUser();
+
+  // (0) ホスト設定の最大訪問数を取得
+  const [minStops, setMinStops] = useState<number>(0); // renamed from maxStops
+  useEffect(() => {
+    if (!roomId || typeof roomId !== 'string') return;
+    const roomRef = doc(db, "rooms", roomId);
+    return onSnapshot(roomRef, (snap) => {
+      if (snap.exists()) {
+        setMinStops((snap.data().minStops as number) || 0); // renamed from maxStops
+      }
+    });
+  }, [roomId]);
+
+  // (1) 全カード情報を準備
+  const allCards: CardInfo[] = useMemo(
+    () =>
+      Array.from({ length: 10 }, (_, i) => {
+        const idx = i + 1;
+        return {
+          id: `card${idx}`,
+          title: `カード${idx}`,
+          src: `/pngs/USJ_${idx}_surface-1.png`,
+          backSrc: `/pngs/back/USJ_${idx}_back-1.png`,
+        };
+      }),
+    []
+  );
+
+  // (2) play1 のログをリアルタイム購読
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  useEffect(() => {
+    if (!roomId || typeof roomId !== 'string') return;
+    const q = query(
+      collection(db, "rooms", roomId, "logs"),
+      where("user", "==", userName)
+    );
+    return onSnapshot(q, (snap) =>
+      setLogs(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))
+    );
+  }, [roomId, userName]);
+
+  // (3) 「行きたい／行きたくない」フィルター
+  const [filter, setFilter] = useState<"want" | "dont">("want");
+
+  // (4) カード表裏フリップ管理
+  const [flipped, setFlipped] = useState<Set<string>>(new Set());
+  const handleFlip = (id: string) =>
+    setFlipped((prev) => {
+      const next = new Set(prev);
+      prev.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  // (5) 選択セット＆理由管理
+  const [wantSelected, setWantSelected] = useState<Set<string>>(new Set());
+  const [dontSelected, setDontSelected] = useState<Set<string>>(new Set());
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+
+  // 理由記入ウィンドウの状態管理
+  const [reasonModal, setReasonModal] = useState<{
+    isOpen: boolean;
+    cardId: string;
+    cardInfo: CardInfo | null;
+    isFlipped: boolean;
+    selectedIcon: number | null;
+    customReason: string;
+  }>({
+    isOpen: false,
+    cardId: "",
+    cardInfo: null,
+    isFlipped: false,
+    selectedIcon: null,
+    customReason: "",
+  });
+
+  const openReasonModal = (cardId: string) => {
+    const cardInfo = allCards.find(c => c.id === cardId) || null;
+    setReasonModal({
+      isOpen: true,
+      cardId,
+      cardInfo,
+      isFlipped: false,
+      selectedIcon: null,
+      customReason: "",
+    });
+  };
+
+  const closeReasonModal = () => {
+    setReasonModal({
+      isOpen: false,
+      cardId: "",
+      cardInfo: null,
+      isFlipped: false,
+      selectedIcon: null,
+      customReason: "",
+    });
+  };
+
+  const confirmReason = () => {
+    const { cardId, selectedIcon, customReason } = reasonModal;
+    const finalReason = selectedIcon !== null ? reasonIcons[selectedIcon].text : customReason.trim();
+    
+    if (!finalReason) {
+      alert("理由を選択または入力してください");
+      return;
+    }
+
+    setReasons(prev => ({ ...prev, [cardId]: finalReason }));
+    
+    const isWant = filter === "want";
+    const setter = isWant ? setWantSelected : setDontSelected;
+    setter(prev => {
+      const next = new Set(prev);
+      next.add(cardId);
+      return next;
+    });
+
+    closeReasonModal();
+  };
+
+  const handleSelect = (id: string) => {
+    const isWant = filter === "want";
+    const selSet = isWant ? wantSelected : dontSelected;
+    const setter = isWant ? setWantSelected : setDontSelected;
+
+    // 既に選択済みなら解除＆理由削除
+    if (selSet.has(id)) {
+      setter((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setReasons((prev) => {
+        const { [id]: _, ...rest } = prev;
+        return rest;
+      });
+      return;
+    }
+    // 選択可能なら理由記入ウィンドウを開く
+    if (selSet.size < minStops) {
+      openReasonModal(id);
+    } else {
+      alert(`選べる上限 (${minStops}) に達しています`);
+    }
+  };
+
+  // (6) フィルタ済みカードリスト
+  const filteredCards = useMemo(() => {
+    const targetPol = filter === "want" ? 3 : 1;
+    return logs
+      .filter((l) => l.polarity === targetPol)
+      .map((l) => allCards.find((c) => c.title === l.card)!)
+      .filter(Boolean);
+  }, [logs, filter, allCards]);
+
+  // (7) 終了処理とオーバーレイ制御
+  const [showOverlay, setShowOverlay] = useState(false);
+  const [planName, setPlanName] = useState("");
+  const handleFinish = async () => {
+    if (!roomId || typeof roomId !== 'string') return;
+    await addDoc(collection(db, "rooms", roomId, "finalSelections"), {
+      user: userName,
+      want: Array.from(wantSelected),
+      dont: Array.from(dontSelected),
+      reasons,
+      timestamp: serverTimestamp(),
+    });
+    setShowOverlay(true);
+  };
+
+  const currentSel = filter === "want" ? wantSelected : dontSelected;
+
+  return (
+    <>
+      {/* Whiteboard Overlay */}
+      {showOverlay && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2000,
+          }}
+        >
+          <div
+            style={{
+              width: "80%",
+              maxWidth: 600,
+              background: "#fff",
+              padding: 24,
+              borderRadius: 8,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            }}
+          >
+            <p style={{ marginBottom: 16, fontSize: "1.1rem" }}>
+              最後にこのカードを選んだ理由が大まかに相手に伝わるように
+              プラン名を考えてください
+            </p>
+            <input
+              type="text"
+              placeholder="プラン名を入力"
+              value={planName}
+              onChange={(e) => setPlanName(e.target.value)}
+              style={{
+                width: "100%",
+                padding: 8,
+                fontSize: "1rem",
+                boxSizing: "border-box",
+                marginBottom: 16,
+              }}
+            />
+            <div
+              style={{
+                fontSize: "1.5rem",
+                fontWeight: "bold",
+                textAlign: "center",
+                marginBottom: 24,
+              }}
+            >
+              {planName}
+            </div>
+
+            {/* カード一覧 */}
+            <div style={{ textAlign: "left", marginBottom: 24 }}>
+              <h3>カード一覧</h3>
+              <div style={{ marginBottom: 16 }}>
+                <strong>行きたいカード</strong>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    marginTop: 8,
+                  }}
+                >
+                  {Array.from(wantSelected).map((id) => {
+                    const c = allCards.find((x) => x.id === id)!;
+                    return (
+                      <div
+                        key={id}
+                        style={{ position: "relative", width: 80 }}
+                      >
+                        <img
+                          src={c.src}
+                          alt={c.title}
+                          style={{
+                            width: "100%",
+                            borderRadius: 4,
+                            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                          }}
+                        />
+                        {reasons[id] && (
+                          <span
+                            style={{
+                              position: "absolute",
+                              bottom: 4,
+                              left: "50%",
+                              transform: "translateX(-50%)",
+                              backgroundColor: "rgba(0,0,0,0.7)",
+                              color: "#fff",
+                              padding: "2px 6px",
+                              borderRadius: 4,
+                              fontSize: "0.6rem",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                            title={reasons[id]}
+                          >
+                            {reasons[id]}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <strong>行きたくないカード</strong>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    marginTop: 8,
+                  }}
+                >
+                  {Array.from(dontSelected).map((id) => {
+                    const c = allCards.find((x) => x.id === id)!;
+                    return (
+                      <div
+                        key={id}
+                        style={{ position: "relative", width: 80 }}
+                      >
+                        <img
+                          src={c.src}
+                          alt={c.title}
+                          style={{
+                            width: "100%",
+                            borderRadius: 4,
+                            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                          }}
+                        />
+                        {reasons[id] && (
+                          <span
+                            style={{
+                              position: "absolute",
+                              bottom: 4,
+                              left: "50%",
+                              transform: "translateX(-50%)",
+                              backgroundColor: "rgba(0,0,0,0.7)",
+                              color: "#fff",
+                              padding: "2px 6px",
+                              borderRadius: 4,
+                              fontSize: "0.6rem",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                            title={reasons[id]}
+                          >
+                            {reasons[id]}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "center", gap: 16 }}>
+              <button
+                onClick={() => router.push(`/room/${roomId}/waiting`)}
+                style={{
+                  padding: "8px 16px",
+                  fontSize: "1rem",
+                  background: "#28a745",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+              >
+                次に進む
+              </button>
+              <button
+                onClick={() => setShowOverlay(false)}
+                style={{
+                  padding: "8px 16px",
+                  fontSize: "1rem",
+                  background: "#ccc",
+                  color: "#333",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+              >
+                カード選択に戻る
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Play2Page UI */}
+      <div style={{ padding: 16, fontFamily: "Arial, sans-serif" }}>
+        <h1 style={{ textAlign: "center", marginBottom: 24 }}>
+          特に行きたい・行きたくないカードを{" "}
+          <strong style={{ color: "#2196f3" }}>{minStops}</strong>個選んでください
+        </h1>
+
+        {/* フィルターボタン */}
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <button
+            onClick={() => setFilter("want")}
+            style={{
+              marginRight: 8,
+              padding: "8px 16px",
+              fontSize: "1rem",
+              background: filter === "want" ? "#e91e63" : "#eee",
+              color: filter === "want" ? "#fff" : "#333",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+          >
+            行きたい
+          </button>
+          <button
+            onClick={() => setFilter("dont")}
+            style={{
+              padding: "8px 16px",
+              fontSize: "1rem",
+              background: filter === "dont" ? "#03a9f4" : "#eee",
+              color: filter === "dont" ? "#fff" : "#333",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+          >
+            行きたくない
+          </button>
+        </div>
+
+        {/* カード一覧＋ライブラリ＋終了ボタン */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 32,
+          }}
+        >
+          {/* カード一覧 */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))",
+              gap: 16,
+              width: "100%",
+              maxWidth: 800,
+            }}
+          >
+            {filteredCards.map((card) => (
+              <div
+                key={card.id}
+                onClick={() => handleFlip(card.id)}
+                onDoubleClick={() => handleSelect(card.id)}
+                style={{
+                  border: currentSel.has(card.id)
+                    ? "3px solid #ff9800"
+                    : "1px solid #ccc",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  overflow: "hidden",
+                  userSelect: "none",
+                }}
+              >
+                <img
+                  src={flipped.has(card.id) ? card.backSrc : card.src}
+                  alt={card.title}
+                  style={{ width: "100%", display: "block" }}
+                />
+                <div style={{ padding: 8, textAlign: "center" }}>
+                  {card.title}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* ライブラリ */}
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 800,
+              padding: 16,
+              backgroundColor: "#fafafa",
+              border: "1px solid #ddd",
+              borderRadius: 8,
+            }}
+          >
+            <h2 style={{ margin: "0 0 12px", fontSize: "1.1rem" }}>
+              {filter === "want"
+                ? "特に行きたいカード"
+                : "特に行きたくないカード"}
+            </h2>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 16,
+                justifyContent: "center",
+                overflowX: "auto",
+              }}
+            >
+              {Array.from(currentSel).map((id) => {
+                const card = allCards.find((c) => c.id === id)!;
+                const reason = reasons[id];
+                return (
+                  <div key={id} style={{ position: "relative", width: 80 }}>
+                    <img
+                      src={card.src}
+                      alt={card.title}
+                      style={{
+                        width: "100%",
+                        borderRadius: 4,
+                        boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                      }}
+                    />
+                    {reason && (
+                      <span
+                        style={{
+                          position: "absolute",
+                          bottom: 4,
+                          left: "50%",
+                          transform: "translateX(-50%)",
+                          backgroundColor: "rgba(0,0,0,0.7)",
+                          color: "#fff",
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          fontSize: "0.6rem",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={reason}
+                      >
+                        {reason}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 終了して次へボタン */}
+          <div style={{ textAlign: "center" }}>
+            <button
+              onClick={handleFinish}
+              style={{
+                padding: "12px 24px",
+                fontSize: "1rem",
+                background: "#2196f3",
+                color: "#fff",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              終了して次へ
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 理由記入ウィンドウ */}
+      {reasonModal.isOpen && reasonModal.cardInfo && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 3000,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeReasonModal();
+          }}
+        >
+          <div
+            style={{
+              width: "80%",
+              maxWidth: 800,
+              height: "80%",
+              background: "#fff",
+              borderRadius: 12,
+              padding: 24,
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+            }}
+          >
+            {/* ヘッダー */}
+            <div
+              style={{
+                textAlign: "center",
+                marginBottom: 24,
+                fontSize: "1.2rem",
+                fontWeight: "bold",
+              }}
+            >
+              このカードを選んだ理由を選択・入力してください
+            </div>
+
+            {/* メインコンテンツ */}
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                gap: 24,
+              }}
+            >
+              {/* 左側：カード表示 */}
+              <div
+                style={{
+                  flex: "0 0 280px",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  style={{
+                    width: 240,
+                    height: 320,
+                    cursor: "pointer",
+                    borderRadius: 8,
+                    overflow: "hidden",
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+                  }}
+                  onClick={() =>
+                    setReasonModal(prev => ({ ...prev, isFlipped: !prev.isFlipped }))
+                  }
+                >
+                  <img
+                    src={
+                      reasonModal.isFlipped
+                        ? reasonModal.cardInfo.backSrc
+                        : reasonModal.cardInfo.src
+                    }
+                    alt={reasonModal.cardInfo.title}
+                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  />
+                </div>
+                <div
+                  style={{
+                    marginTop: 12,
+                    fontSize: "1rem",
+                    fontWeight: "bold",
+                    textAlign: "center",
+                  }}
+                >
+                  {reasonModal.cardInfo.title}
+                </div>
+              </div>
+
+              {/* 右側：アイコン選択 */}
+              <div style={{ flex: 1 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(6, 1fr)",
+                    gap: 12,
+                    marginBottom: 24,
+                  }}
+                >
+                  {reasonIcons.map((icon, index) => (
+                    <div
+                      key={index}
+                      onClick={() => {
+                        setReasonModal(prev => ({ 
+                          ...prev, 
+                          selectedIcon: index,
+                          customReason: icon.text 
+                        }));
+                      }}
+                      style={{
+                        padding: 12,
+                        border: reasonModal.selectedIcon === index ? "3px solid #2196f3" : "1px solid #ddd",
+                        borderRadius: 8,
+                        cursor: "pointer",
+                        textAlign: "center",
+                        backgroundColor: reasonModal.selectedIcon === index ? "#e3f2fd" : "#fff",
+                        transition: "all 0.2s ease",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        height: 60,
+                      }}
+                    >
+                      <div style={{ fontSize: "2.5rem" }}>
+                        {icon.emoji}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* テキストボックス */}
+                <textarea
+                  value={reasonModal.customReason}
+                  onChange={(e) =>
+                    setReasonModal(prev => ({ 
+                      ...prev, 
+                      customReason: e.target.value,
+                      selectedIcon: null 
+                    }))
+                  }
+                  placeholder="理由を記入して下さい"
+                  style={{
+                    width: "100%",
+                    height: 80,
+                    padding: 12,
+                    fontSize: "1rem",
+                    border: "1px solid #ddd",
+                    borderRadius: 8,
+                    resize: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* フッター：ボタン */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: 16,
+                marginTop: 24,
+              }}
+            >
+              <button
+                onClick={confirmReason}
+                style={{
+                  padding: "12px 24px",
+                  fontSize: "1rem",
+                  backgroundColor: "#2196f3",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                決定
+              </button>
+              <button
+                onClick={closeReasonModal}
+                style={{
+                  padding: "12px 24px",
+                  fontSize: "1rem",
+                  backgroundColor: "#666",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                戻る
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
