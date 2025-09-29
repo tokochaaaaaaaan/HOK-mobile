@@ -104,7 +104,7 @@ const CardItem = React.memo(function CardItem({
     <div
       key={card.id}
       draggable={false}
-      onClick={(e) => onPick(card, category, e.clientX, e.clientY)}
+      onClick={(e) => { e.stopPropagation(); onPick(card, category, e.clientX, e.clientY); }}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -116,6 +116,10 @@ const CardItem = React.memo(function CardItem({
         WebkitBackfaceVisibility: 'hidden',
         backfaceVisibility: 'hidden',
         WebkitTransform: composedTransform,
+        WebkitTransformStyle: 'preserve-3d',
+        transformStyle: 'preserve-3d',
+        // Safari flicker対策: レイヤー固定
+        contain: 'layout paint style',
         zIndex: hovered ? 2 : 1,
         boxShadow: hovered ? '0 6px 18px rgba(0,0,0,0.15)' : 'none',
       }}
@@ -163,6 +167,7 @@ const CardItem = React.memo(function CardItem({
             transform: 'translateZ(0)',
             WebkitBackfaceVisibility: 'hidden',
             backfaceVisibility: 'hidden',
+            willChange: 'transform',
           }}
         />
       </div>
@@ -364,12 +369,6 @@ export default function WaitingPage() {
   const [dropZone, setDropZone] = useState<CategoryType | null>(null);
   const [interactionLocked, setInteractionLocked] = useState(false); // 合致率ボタン押下後にロック
   const [dragPos, setDragPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const isSafari = useMemo(() => {
-    if (typeof navigator === 'undefined') return false;
-    const ua = navigator.userAgent;
-    return /Safari\//.test(ua) && !/Chrome\//.test(ua);
-  }, []);
-
   // Drag ghost positioning (RAF throttled)
   const dragPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const rafRef = useRef<number | null>(null);
@@ -382,18 +381,6 @@ export default function WaitingPage() {
       });
     }
   }, []);
-
-  // Transparent drag image to hide native ghost
-  const transparentImgRef = useRef<HTMLImageElement | null>(null);
-  const getTransparentImg = () => {
-    if (!transparentImgRef.current) {
-      const img = new Image();
-      // 1x1 transparent PNG
-      img.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/YEpE6kAAAAASUVORK5CYII=';
-      transparentImgRef.current = img;
-    }
-    return transparentImgRef.current;
-  };
 
   // Debounced save timeout
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -1043,42 +1030,6 @@ export default function WaitingPage() {
   }, [allCards, categories, debouncedSaveToRTDB, writeLogToRTDB]);
 
   // ===============================
-  // Drag & Drop Handlers
-  // ===============================
-
-  const handleDragStart = (e: React.DragEvent, card: CardWithReason, fromCategory: CategoryType) => {
-    if (interactionLocked) return; // ロック中は開始させない
-    setDraggedCard({
-      id: card.id,
-      title: card.title,
-      src: card.src,
-      reason: card.reason,
-      fromCategory,
-    });
-    setIsDragging(true);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', card.id);
-    // ネイティブのゴーストは透明画像に差し替えて隠し、カスタムゴーストを表示
-    try {
-      const img = getTransparentImg();
-      e.dataTransfer.setDragImage(img, 0, 0);
-    } catch {}
-  };
-
-  const handleDragEnd = () => {
-    setIsDragging(false);
-    setDropZone(null);
-    setDraggedCard(null);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    // ドラッグ位置をプレビュー用に更新（全ブラウザ、RAFでスムーズに）
-    scheduleDragPosUpdate(e.clientX, e.clientY);
-  };
-
-  // ===============================
   // Click-to-Drag (Pick & Drop) Handlers
   // ===============================
 
@@ -1164,74 +1115,7 @@ export default function WaitingPage() {
     };
   }, [isDragging, scheduleDragPosUpdate]);
 
-  const handleDragEnter = (e: React.DragEvent, category: CategoryType) => {
-    e.preventDefault();
-    if (isDragging) {
-      setDropZone(category);
-    }
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    // Only clear drop zone if leaving the entire drop area
-    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-      setDropZone(null);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent, targetCategory: CategoryType) => {
-    e.preventDefault();
-    setIsDragging(false);
-    setDropZone(null);
-    
-    if (interactionLocked) return; // ロック中は無視
-    
-    // Safari 対策: dragendが先に走っても dataTransfer からIDを取得
-    let id = draggedCard?.id || e.dataTransfer.getData('text/plain');
-    if (!id) return;
-    // 元カテゴリが取得できなければ検索
-    let fromCategory = draggedCard?.fromCategory;
-    if (!fromCategory) {
-      if (categories.veryWant.some(c => c.id === id)) fromCategory = 'veryWant';
-      else if (categories.want.some(c => c.id === id)) fromCategory = 'want';
-      else if (categories.neutral.some(c => c.id === id)) fromCategory = 'neutral';
-      else if (categories.dont.some(c => c.id === id)) fromCategory = 'dont';
-      else if (categories.veryDont.some(c => c.id === id)) fromCategory = 'veryDont';
-    }
-    
-    // 同じカテゴリにドロップした場合は何もしない
-    if (fromCategory === targetCategory) {
-      setDraggedCard(null);
-      return;
-    }
-    
-    // 元のカードを探して理由があるかチェック
-    const originalCard = Object.values(categories).flat().find(c => c.id === id);
-    const hasReason = originalCard?.reason;
-    
-    // 理由付きカードを移動する場合は確認ダイアログを表示
-    if (hasReason && fromCategory && (fromCategory === 'veryWant' || fromCategory === 'veryDont')) {
-      const title = draggedCard?.title || originalCard?.title || '';
-      setConfirmDialog({
-        isOpen: true,
-        cardId: id,
-        cardTitle: title,
-        originalCategory: fromCategory,
-        targetCategory,
-      });
-      setDraggedCard(null);
-      return;
-    }
-    
-    // If dropping into veryWant or veryDont, open reason modal
-    if (targetCategory === 'veryWant' || targetCategory === 'veryDont') {
-      openReasonModal(id, targetCategory, fromCategory as CategoryType);
-    } else {
-      moveCardToCategory(id, targetCategory);
-    }
-    
-    setDraggedCard(null);
-  };
+  // (ネイティブDnDは廃止)
 
   // ===============================
   // Reason Modal Handlers
@@ -1393,10 +1277,6 @@ export default function WaitingPage() {
             alignItems: 'flex-start',
             flexWrap: 'wrap',
           }}
-          onDragOver={handleDragOver}
-          onDragEnter={(e) => handleDragEnter(e, category)}
-          onDragLeave={handleDragLeave}
-          onDrop={(e) => handleDrop(e, category)}
           onClick={() => attemptDropToCategory(category)}
         >
           {/* 一番左の配置可能枠（常に表示） */}
@@ -1472,11 +1352,6 @@ export default function WaitingPage() {
       padding: '16px',
       transition: 'background-color 0.2s ease',
     }}
-      onDragOver={(e) => {
-        // ページ全体でも位置を更新（ゾーン外でも滑らかに追従）
-        e.preventDefault();
-        scheduleDragPosUpdate(e.clientX, e.clientY);
-      }}
     >
       <div style={{
         maxWidth: '1280px',

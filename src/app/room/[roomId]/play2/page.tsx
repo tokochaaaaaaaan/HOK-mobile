@@ -428,6 +428,19 @@ export default function Play2Page() {
                 fontSize: "1rem",
                 boxSizing: "border-box",
                 marginBottom: 16,
+                background: "#fff",
+                border: "2px solid #e5e7eb",
+                borderRadius: 8,
+                boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+                outline: "none",
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.border = "2px solid #60a5fa";
+                e.currentTarget.style.boxShadow = "0 10px 28px rgba(99,102,241,0.18)";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.border = "2px solid #e5e7eb";
+                e.currentTarget.style.boxShadow = "0 6px 18px rgba(0,0,0,0.08)";
               }}
             />
             <div

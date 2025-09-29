@@ -91,8 +91,8 @@ const ConfettiCanvas: React.FC<{ trigger: boolean }> = ({ trigger }) => {
     };
   }, [trigger]);
 
-  // z-index を低くしてテキストを前面に出せるように調整
-  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" />;
+  // 背景の上、メインカードの下に来るよう z-index を高めに設定
+  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-30" />;
 };
 
 // ================= Main Page =================
@@ -119,6 +119,8 @@ export default function MatchResultPage() {
   const [userSelections, setUserSelections] = useState<UserSelection[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [overallAgreement, setOverallAgreement] = useState<number>(0);
+  // 表示用のカウントアップ値（reveal時にアニメーション）
+  const [displayValue, setDisplayValue] = useState<number>(0);
 
   // ========== Data Subscription ==========
   useEffect(() => {
@@ -289,6 +291,19 @@ export default function MatchResultPage() {
         );
       }
 
+      // カウントアップ演出（1.2秒）
+      const start = performance.now();
+      const from = 0;
+      const to = Math.round(overallAgreement);
+      const duration = 1200;
+      const ease = (t: number) => 1 - Math.pow(1 - t, 3); // easeOutCubic
+      const tick = (t: number) => {
+        const p = Math.min(1, (t - start) / duration);
+        setDisplayValue(Math.round(from + (to - from) * ease(p)));
+        if (p < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+
       // 7秒後に自動遷移
       const t = setTimeout(() => {
         console.log('Match result: Auto-navigating to play3');
@@ -314,7 +329,18 @@ export default function MatchResultPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 flex items-center justify-center relative overflow-hidden">
+    <div
+      style={{
+        minHeight: '100vh',
+        width: '100%',
+        position: 'relative',
+        overflow: 'hidden',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #0f172a 0%, #0b102d 40%, #18092c 100%)',
+      }}
+    >
       {/* Audio elements */}
       <audio ref={drumrollRef} preload="auto">
         <source src="/audio/drumroll.mp3" type="audio/mpeg" />
@@ -324,49 +350,103 @@ export default function MatchResultPage() {
       </audio>
 
       {/* Confetti */}
-      <ConfettiCanvas trigger={phase === 'reveal'} />
+      <div style={{ position: 'absolute', inset: 0, zIndex: 30, pointerEvents: 'none' }}>
+        <ConfettiCanvas trigger={phase === 'reveal'} />
+      </div>
 
-  <div className="text-center text-white z-10 relative">
+      {/* 背景の装飾グロー */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }}>
+        <div style={{ position: 'absolute', top: -120, left: -120, width: '55vmax', height: '55vmax', borderRadius: '50%', background: 'radial-gradient(circle, rgba(99,102,241,0.18), rgba(14,165,233,0.08), transparent 70%)', filter: 'blur(30px)' }} />
+        <div style={{ position: 'absolute', bottom: -160, right: -160, width: '70vmax', height: '70vmax', borderRadius: '50%', background: 'radial-gradient(circle, rgba(251,191,36,0.18), rgba(236,72,153,0.10), transparent 70%)', filter: 'blur(35px)' }} />
+      </div>
+
+      <div style={{ color: '#fff', textAlign: 'center', position: 'relative', zIndex: 40, padding: '0 16px' }}>
         {phase === 'waiting' && (
-          <div className="text-6xl mb-4 animate-pulse">⏳</div>
+          <div style={{ fontSize: '56px', marginBottom: '16px', animation: 'fadeInUp 0.8s ease-out both' }}>⏳</div>
         )}
 
         {phase === 'announce' && (
-          <div className="animate-fadeIn">
-            <div className="text-6xl mb-6">🎉</div>
-            <div className="text-4xl font-bold mb-4">合致率計算完了！</div>
-            <div className="text-xl">結果を発表します...</div>
+          <div style={{ animation: 'fadeInUp 0.8s ease-out both' }}>
+            <div style={{ fontSize: '56px', marginBottom: '16px' }}>🎉</div>
+            <div style={{
+              fontSize: 'clamp(24px, 6vw, 40px)',
+              fontWeight: 800,
+              marginBottom: '12px',
+              backgroundImage: 'linear-gradient(90deg, #fde68a, #fecaca, #c7d2fe)',
+              WebkitBackgroundClip: 'text',
+              backgroundClip: 'text',
+              color: 'transparent',
+              textShadow: '0 2px 8px rgba(0,0,0,0.25)'
+            }}>
+              合致率計算完了！
+            </div>
+            <div style={{ fontSize: '18px', opacity: 0.9 }}>結果を発表します...</div>
           </div>
         )}
 
         {phase === 'drumroll' && (
-          <div className="animate-pulse">
-            <div className="text-xl">みんなの合致率は？</div>
+          <div style={{ animation: 'fadeInUp 0.8s ease-out both' }}>
+            <div style={{
+              fontSize: 'clamp(22px, 5vw, 32px)',
+              fontWeight: 700,
+              letterSpacing: '0.02em',
+              backgroundImage: 'linear-gradient(90deg, #c7d2fe, #f5d0fe, #fde68a)',
+              WebkitBackgroundClip: 'text',
+              backgroundClip: 'text',
+              color: 'transparent'
+            }}>
+              みんなの合致率は？
+            </div>
           </div>
         )}
 
         {phase === 'reveal' && (
-          <div className="animate-bounceIn relative mx-auto w-[min(90vw,640px)] px-2">
+          <div style={{ animation: 'bounceIn 0.6s ease-out both', position: 'relative', margin: '0 auto', width: 'min(94vw, 720px)', padding: '0 8px' }}>
             {/* グロー背景 */}
-            <div className="absolute inset-0 -z-10 rounded-3xl bg-gradient-to-br from-yellow-400/30 via-pink-500/20 to-purple-600/30 blur-2xl opacity-80" />
-            <div className="relative rounded-3xl border border-white/30 bg-white/10 backdrop-blur-xl shadow-[0_0_35px_-5px_rgba(255,255,255,0.4)] p-10">
-              <div className="absolute inset-0 rounded-3xl pointer-events-none [mask-image:radial-gradient(circle_at_30%_20%,white,transparent)]" />
-              <div className="flex flex-col items-center relative">
-                <div className="text-7xl md:text-8xl mb-6 drop-shadow-lg">🎊</div>
-                <div className="text-[11vw] md:text-7xl font-extrabold mb-4 text-transparent bg-clip-text bg-gradient-to-br from-yellow-200 via-yellow-400 to-amber-500 drop-shadow-[0_4px_10px_rgba(0,0,0,0.35)] tracking-tight">
-                  {Math.round(overallAgreement)}%
+            <div style={{ position: 'absolute', inset: 0, zIndex: -1, borderRadius: 32, background: 'linear-gradient(135deg, rgba(251,191,36,0.25), rgba(236,72,153,0.20), rgba(79,70,229,0.25))', filter: 'blur(30px)', opacity: 0.9 }} />
+            <div style={{ position: 'relative', borderRadius: 28, border: '1px solid rgba(255,255,255,0.28)', background: 'rgba(255,255,255,0.10)', backdropFilter: 'blur(22px)', boxShadow: '0 0 45px -10px rgba(255,255,255,0.5)', padding: '28px 20px', overflow: 'hidden' }}>
+              {/* 角度のあるハイライト */}
+              <div style={{ position: 'absolute', top: '-50%', left: '25%', width: '120%', height: '120%', transform: 'rotate(12deg)', background: 'linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0) 35%)', pointerEvents: 'none' }} />
+
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
+                <div style={{ fontSize: '72px', marginBottom: 8, textShadow: '0 4px 10px rgba(0,0,0,0.35)' }}>🎊</div>
+
+                {/* 円形プログレスリング */}
+                <div style={{ position: 'relative', margin: '24px 0' }}>
+                  <div style={{ position: 'relative', width: 'min(60vw, 320px)', height: 'min(60vw, 320px)' }}>
+                    {/* 外周の光 */}
+                    <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'rgba(255,255,255,0.10)', filter: 'blur(20px)' }} />
+                    {/* 実リング */}
+                    <div style={{
+                      position: 'absolute', inset: 0, borderRadius: '50%',
+                      background: `conic-gradient(#fde047 ${Math.round(overallAgreement)}%, rgba(255,255,255,0.08) ${Math.round(overallAgreement)}%)`,
+                      WebkitMask: 'radial-gradient(circle at center, transparent 64%, black 65%)',
+                      mask: 'radial-gradient(circle at center, transparent 64%, black 65%)'
+                    }} />
+                    {/* 中央数値 */}
+                    <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+                      <div style={{
+                        fontSize: 'clamp(48px, 14vw, 96px)',
+                        fontWeight: 900,
+                        backgroundImage: 'linear-gradient(135deg, #fef3c7, #fcd34d, #fb7185)',
+                        WebkitBackgroundClip: 'text',
+                        backgroundClip: 'text',
+                        color: 'transparent',
+                        textShadow: '0 4px 12px rgba(0,0,0,0.35)'
+                      }}>
+                        {displayValue}%
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="text-3xl md:text-4xl font-bold mb-3 tracking-wide">
-                  合致率
+
+                <div style={{ fontSize: 'clamp(22px, 5vw, 32px)', fontWeight: 800, letterSpacing: '0.02em', marginBottom: 8 }}>合致率</div>
+                <div style={{ fontSize: 'clamp(14px, 3.6vw, 18px)', fontWeight: 600, marginBottom: 12, minHeight: 40, display: 'flex', alignItems: 'center' }}>
+                  {overallAgreement >= 80 && '素晴らしい一致度です！'}
+                  {overallAgreement >= 60 && overallAgreement < 80 && '良い合致率ですね！'}
+                  {overallAgreement < 60 && '意見が分かれていますね'}
                 </div>
-                <div className="text-lg md:text-xl font-medium mb-4 min-h-[2.5rem] flex items-center">
-                  {overallAgreement >= 80 && "素晴らしい一致度です！"}
-                  {overallAgreement >= 60 && overallAgreement < 80 && "良い合致率ですね！"}
-                  {overallAgreement < 60 && "意見が分かれていますね"}
-                </div>
-                <div className="text-xs md:text-sm mt-6 opacity-70">
-                  まもなく詳細分析画面に移動します...
-                </div>
+                <div style={{ fontSize: '12px', opacity: 0.8, marginTop: 6 }}>まもなく詳細分析画面に移動します...</div>
               </div>
             </div>
           </div>
