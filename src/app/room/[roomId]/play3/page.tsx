@@ -160,69 +160,59 @@ export default function Play3Page() {
 
   // presence を優先して参加者を決定（未取得時は selections をフォールバック）
   const participants = useMemo(() => {
-    const base = new Map<string, { id: string; name: string; plan: string }>();
-    const normalizedRoom = roomParticipants.map((p) => ({
-      id: p.id,
-      name: typeof p.name === "string" && p.name.trim().length > 0 ? p.name : p.id,
-    }));
-    const nameToId = new Map(
-      normalizedRoom.map((p) => [p.name, p.id] as [string, string])
-    );
-
-    normalizedRoom.forEach((p) => {
-      base.set(p.id, { id: p.id, name: p.name, plan: "" });
+    // シンプルなバージョンに変更してテスト
+    const uniqueParticipants = new Map<string, { id: string; name: string; plan: string }>();
+    
+    // 1. roomParticipantsから追加
+    roomParticipants.forEach((p) => {
+      if (p.id && p.name) {
+        uniqueParticipants.set(p.id, { 
+          id: p.id, 
+          name: p.name, 
+          plan: "" 
+        });
+      }
     });
-
+    
+    // 2. selectionsから追加（重複チェック）
     selections.forEach((s) => {
-      const trimmedUserName = (s.userName || s.user || "").trim();
-      const candidates = [s.userId, s.user].filter(
-        (v): v is string => typeof v === "string" && v.length > 0
-      );
-      if (trimmedUserName && nameToId.has(trimmedUserName)) {
-        candidates.unshift(nameToId.get(trimmedUserName)!);
+      if (s.userId && s.userName && !uniqueParticipants.has(s.userId)) {
+        uniqueParticipants.set(s.userId, {
+          id: s.userId,
+          name: s.userName,
+          plan: s.planName || ""
+        });
       }
-      const matchId = candidates.find((cid) => base.has(cid)) || candidates[0];
-      if (!matchId) return;
-      const current = base.get(matchId);
-      const name = current?.name || trimmedUserName || matchId;
-      base.set(matchId, {
-        id: matchId,
-        name,
-        plan: s.planName || current?.plan || "",
+    });
+    
+    // 3. presentIdsがあればそれでフィルタ
+    if (presentIds && presentIds.length > 0) {
+      const presentParticipants = Array.from(uniqueParticipants.values())
+        .filter(p => presentIds.includes(p.id));
+      
+      console.log('Participants calculation:', {
+        roomParticipants,
+        selections,
+        presentIds,
+        uniqueParticipants: Array.from(uniqueParticipants.values()),
+        presentParticipants,
+        finalResult: presentParticipants
       });
+      
+      return presentParticipants;
+    }
+    
+    const result = Array.from(uniqueParticipants.values());
+    
+    console.log('Participants calculation (no presentIds):', {
+      roomParticipants,
+      selections,
+      presentIds,
+      uniqueParticipants: result,
+      finalResult: result
     });
-
-    selections.forEach((s) => {
-      const id = (s.userId || s.user || "").trim();
-      if (!id || base.has(id)) return;
-      base.set(id, {
-        id,
-        name: (s.userName || s.user || id || "").trim() || id,
-        plan: s.planName || "",
-      });
-    });
-
-    const orderSource =
-      presentIds && presentIds.length
-        ? presentIds
-        : normalizedRoom.map((p) => p.id);
-    const seen = new Set<string>();
-    const list: { id: string; name: string; plan: string }[] = [];
-    orderSource.forEach((id) => {
-      if (!id || seen.has(id)) return;
-      const item = base.get(id);
-      if (item) {
-        list.push(item);
-        seen.add(id);
-      }
-    });
-    base.forEach((value, id) => {
-      if (!seen.has(id)) {
-        list.push(value);
-        seen.add(id);
-      }
-    });
-    return list;
+    
+    return result;
   }, [presentIds, selections, roomParticipants]);
 
   // ===== 全員投票モード =====
@@ -257,16 +247,27 @@ export default function Play3Page() {
   ]);
 
   const displayParticipants = useMemo(() => {
-    if (myUserId && participants.some((p) => p.id === myUserId)) {
-      return participants;
+    // 重複除去と有効な参加者のみフィルタリング
+    const validParticipants = participants.filter((p) => 
+      p.id && p.id.trim() && p.name && p.name.trim()
+    );
+    
+    // 自分が含まれているかチェック
+    const selfIncluded = myUserId && validParticipants.some((p) => p.id === myUserId);
+    
+    if (selfIncluded) {
+      return validParticipants;
     }
+    
+    // 自分が含まれていない場合は追加
     if (myUserId && normalizedUserName) {
       return [
-        ...participants,
+        ...validParticipants,
         { id: myUserId, name: normalizedUserName, plan: "" },
       ];
     }
-    return participants;
+    
+    return validParticipants;
   }, [participants, myUserId, normalizedUserName]);
 
   const expectedVoteIds = useMemo(() => {
@@ -554,29 +555,46 @@ export default function Play3Page() {
   );
 
   // UI: 参加者アイコン（頭文字）
-  const renderAvatars = () => (
-    <div style={{ display: "flex", gap: 8 }}>
-      {displayParticipants.map((p) => (
-        <button
-          key={p.id}
-          onClick={() => setActiveUserInfo(p.id)}
-          title={p.name}
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: "50%",
-            border: "1px solid #e5e7eb",
-            background: "#fff",
-            boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
-            fontWeight: 800,
-            color: "#111827",
-          }}
-        >
-          {p.name?.[0] || "?"}
-        </button>
-      ))}
-    </div>
-  );
+  const renderAvatars = () => {
+    // 最大4人まで表示、実際の参加者数に応じて調整
+    const actualParticipants = displayParticipants.filter((p) => 
+      p.id && p.id.trim() && p.name && p.name.trim()
+    );
+    
+    console.log('Rendering avatars:', { 
+      actualParticipants, 
+      displayParticipants, 
+      participants, 
+      roomParticipants, 
+      myUserId, 
+      normalizedUserName 
+    });
+    
+    return (
+      <div style={{ display: "flex", gap: 8 }}>
+        {actualParticipants.slice(0, 4).map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setActiveUserInfo(p.id)}
+            title={`${p.name} (${p.id})`}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: "50%",
+              border: "1px solid #e5e7eb",
+              background: "#fff",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
+              fontWeight: 800,
+              color: "#111827",
+              cursor: "pointer",
+            }}
+          >
+            {p.name?.[0]?.toUpperCase() || "?"}
+          </button>
+        ))}
+      </div>
+    );
+  };
 
   const getCard = (id: string) => ALL_CARDS.find((c) => c.id === id);
 
@@ -1919,7 +1937,7 @@ export default function Play3Page() {
                                   marginLeft: "auto",
                                 }}
                               >
-                                {`${initiatorDisplayName || "誰か"}さんが投票を開始しました。`}
+                                投票しましょう
                               </div>
                             )}
 
@@ -1927,14 +1945,21 @@ export default function Play3Page() {
                               <button
                                 aria-pressed={votedNo}
                                 disabled={hasVoted && !votedNo}
-                                onClick={() =>
-                                  !hasVoted
-                                    ? activeVote?.modalOpen &&
-                                      activeVote.cardId === cardModal.id
-                                      ? castVote("no")
-                                      : startVote("no", cardModal.id)
-                                    : undefined
-                                }
+                                onClick={() => {
+                                  console.log('No button clicked:', { 
+                                    hasVoted, 
+                                    activeVote: activeVote?.modalOpen, 
+                                    cardId: activeVote?.cardId, 
+                                    modalCardId: cardModal.id 
+                                  });
+                                  if (!hasVoted) {
+                                    if (activeVote?.modalOpen && activeVote.cardId === cardModal.id) {
+                                      castVote("no");
+                                    } else {
+                                      startVote("no", cardModal.id);
+                                    }
+                                  }
+                                }}
                                 style={noStyle}
                               >
                                 行かない
@@ -1957,14 +1982,21 @@ export default function Play3Page() {
                               <button
                                 aria-pressed={votedPending}
                                 disabled={hasVoted && !votedPending}
-                                onClick={() =>
-                                  !hasVoted
-                                    ? activeVote?.modalOpen &&
-                                      activeVote.cardId === cardModal.id
-                                      ? castVote("pending")
-                                      : startVote("pending", cardModal.id)
-                                    : undefined
-                                }
+                                onClick={() => {
+                                  console.log('Pending button clicked:', { 
+                                    hasVoted, 
+                                    activeVote: activeVote?.modalOpen, 
+                                    cardId: activeVote?.cardId, 
+                                    modalCardId: cardModal.id 
+                                  });
+                                  if (!hasVoted) {
+                                    if (activeVote?.modalOpen && activeVote.cardId === cardModal.id) {
+                                      castVote("pending");
+                                    } else {
+                                      startVote("pending", cardModal.id);
+                                    }
+                                  }
+                                }}
                                 style={pendingStyle}
                               >
                                 保留
@@ -1987,14 +2019,21 @@ export default function Play3Page() {
                               <button
                                 aria-pressed={votedGo}
                                 disabled={hasVoted && !votedGo}
-                                onClick={() =>
-                                  !hasVoted
-                                    ? activeVote?.modalOpen &&
-                                      activeVote.cardId === cardModal.id
-                                      ? castVote("go")
-                                      : startVote("go", cardModal.id)
-                                    : undefined
-                                }
+                                onClick={() => {
+                                  console.log('Go button clicked:', { 
+                                    hasVoted, 
+                                    activeVote: activeVote?.modalOpen, 
+                                    cardId: activeVote?.cardId, 
+                                    modalCardId: cardModal.id 
+                                  });
+                                  if (!hasVoted) {
+                                    if (activeVote?.modalOpen && activeVote.cardId === cardModal.id) {
+                                      castVote("go");
+                                    } else {
+                                      startVote("go", cardModal.id);
+                                    }
+                                  }
+                                }}
                                 style={goStyle}
                               >
                                 行く
