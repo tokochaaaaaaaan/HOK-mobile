@@ -22,6 +22,8 @@ import {
 } from "../../../../utils/agreement-calculator";
 import { normalizeCategories } from "../../../../utils/normalizeCategories";
 
+const PLAY3_VOTE_COLLECTION = "play3Votes";
+
 export default function Play3Page() {
   const params = useParams();
   const roomId = Array.isArray((params as any).roomId)
@@ -124,6 +126,54 @@ export default function Play3Page() {
       ? participants
       : [...participants, { id: myUserId, name: userName || "自分", plan: "" }];
   }, [participants, myUserId, userName]);
+  const expectedVoteIds = useMemo(() => {
+    const ids =
+      activeVote?.expectedUserIds && activeVote.expectedUserIds.length > 0
+        ? activeVote.expectedUserIds
+        : participants.map((p) => p.id);
+    const seen = new Set<string>();
+    return ids.filter((id) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }, [activeVote?.expectedUserIds, participants]);
+  const participantMap = useMemo(
+    () => new Map(participants.map((p) => [p.id, p] as const)),
+    [participants]
+  );
+  const voteAvatarBaseStyle = {
+    width: 26,
+    height: 26,
+    borderRadius: "50%",
+    border: "1px solid #e5e7eb",
+    background: "#fff",
+    boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
+    fontWeight: 800,
+    fontSize: 12,
+    color: "#111827",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  } as const;
+  const renderVoteAvatars = (target: VoteChoice) => {
+    const nodes: React.ReactNode[] = [];
+    expectedVoteIds.forEach((id) => {
+      const current = voteMap[id] || (id === myUserId ? myVoteChoice : null);
+      if (current !== target) return;
+      const info = participantMap.get(id);
+      const style: React.CSSProperties = {
+        ...voteAvatarBaseStyle,
+        marginLeft: nodes.length ? -12 : 0,
+      };
+      nodes.push(
+        <div key={`${target}-${id}`} title={info?.name || id} style={style}>
+          {info?.name?.[0] || id?.[0] || "?"}
+        </div>
+      );
+    });
+    return nodes;
+  };
 
   // 移行（結果へ）準備状況
   const [play3Ready, setPlay3Ready] = useState<Record<string, boolean>>({});
@@ -396,17 +446,45 @@ export default function Play3Page() {
   };
 
   // ===== 全員投票モード =====
+  type VoteChoice = "go" | "no" | "pending";
   type ActiveVote =
     | {
         cardId: string;
         sessionId: string;
         modalOpen: boolean;
         initiatedBy?: string;
+        round: number;
+        expectedUserIds?: string[];
       }
     | null;
   const [activeVote, setActiveVote] = useState<ActiveVote>(null);
-  const [voteMap, setVoteMap] = useState<Record<string, "go" | "no" | "pending">>({});
-  const [myVoteChoice, setMyVoteChoice] = useState<"go" | "no" | "pending" | null>(null);
+  const [voteMap, setVoteMap] = useState<Record<string, VoteChoice>>({});
+  const [myVoteChoice, setMyVoteChoice] = useState<VoteChoice | null>(null);
+
+  const CHOICE_TO_CODE: Record<VoteChoice, 0 | 1 | 2> = {
+    go: 1,
+    no: 0,
+    pending: 2,
+  };
+  const CODE_TO_CHOICE: Record<0 | 1 | 2, VoteChoice> = {
+    0: "no",
+    1: "go",
+    2: "pending",
+  };
+  const formatVoteValue = (round: number, choice: VoteChoice) =>
+    `y${round}-${CHOICE_TO_CODE[choice]}`;
+  const parseVoteValue = (value: unknown):
+    | { round: number; choice: VoteChoice }
+    | null => {
+    if (typeof value !== "string") return null;
+    const match = value.match(/^y(\d+)-([0-2])$/);
+    if (!match) return null;
+    const round = Number(match[1]);
+    const code = Number(match[2]);
+    const choice = CODE_TO_CHOICE[code];
+    if (!choice || Number.isNaN(round)) return null;
+    return { round, choice };
+  };
 
   // 状態購読（全員へモーダル同期）
   useEffect(() => {
@@ -419,6 +497,10 @@ export default function Play3Page() {
           sessionId: data.sessionId || "",
           modalOpen: !!data.modalOpen,
           initiatedBy: data.initiatedBy,
+          round: typeof data.round === "number" ? data.round : 0,
+          expectedUserIds: Array.isArray(data.expectedUserIds)
+            ? (data.expectedUserIds as string[])
+            : undefined,
         };
         setActiveVote(next);
         if (next.modalOpen && next.cardId) {
@@ -437,53 +519,94 @@ export default function Play3Page() {
     const cid = activeVote?.cardId;
     if (!cid || !activeVote?.modalOpen) {
       setVoteMap({});
+      setMyVoteChoice(null);
       return;
     }
     const nameToId = new Map<string, string>(participants.map((p) => [p.name, p.id]));
     const validIds = new Set(participants.map((p) => p.id));
-    const unsub = onSnapshot(doc(db, "rooms", roomId, "play3Votes", cid), (snap) => {
-      const data: any = snap.data();
-      const raw = data?.sessionId === activeVote.sessionId ? (data?.votes || {}) : {};
-      // 正規化: userName キーが来ても userId に寄せる
-      const normalized: Record<string, "go" | "no" | "pending"> = {};
-      Object.entries(raw).forEach(([k, v]) => {
-        const vv = v as "go" | "no" | "pending";
-        if (validIds.has(k)) {
-          normalized[k] = vv;
-        } else if (nameToId.has(k)) {
-          normalized[nameToId.get(k)!] = vv;
-        } else {
-          // 不明キーはそのまま保持（互換）
-          normalized[k] = vv;
+    const unsub = onSnapshot(
+      doc(db, "rooms", roomId, PLAY3_VOTE_COLLECTION, cid),
+      (snap) => {
+        const data: any = snap.data();
+        if (!data || data.sessionId !== activeVote.sessionId) {
+          setVoteMap({});
+          setMyVoteChoice(null);
+          return;
         }
-      });
-      setVoteMap(normalized);
-    });
+        const docRound =
+          typeof data.currentRound === "number" ? data.currentRound : 0;
+        const raw = data?.votes || {};
+        const normalized: Record<string, VoteChoice> = {};
+        Object.entries(raw).forEach(([k, v]) => {
+          const parsed = parseVoteValue(v);
+          if (!parsed) return;
+          if (docRound > 0 && parsed.round !== docRound) return;
+          let key = k;
+          if (validIds.has(k)) {
+            key = k;
+          } else if (nameToId.has(k)) {
+            key = nameToId.get(k)!;
+          }
+          normalized[key] = parsed.choice;
+        });
+        const myServerChoice = normalized[myUserId];
+        setVoteMap(() => {
+          const merged: Record<string, VoteChoice> = { ...normalized };
+          if (
+            !myServerChoice &&
+            myUserId &&
+            myVoteChoice &&
+            (!activeVote.round || docRound === activeVote.round)
+          ) {
+            merged[myUserId] = myVoteChoice;
+          }
+          return merged;
+        });
+        if (myServerChoice) {
+          setMyVoteChoice(myServerChoice);
+        }
+      }
+    );
     return () => unsub();
-  }, [roomId, activeVote?.cardId, activeVote?.sessionId, activeVote?.modalOpen, participants]);
+  }, [
+    roomId,
+    activeVote?.cardId,
+    activeVote?.sessionId,
+    activeVote?.modalOpen,
+    activeVote?.round,
+    participants,
+    myUserId,
+    myVoteChoice,
+  ]);
 
   // 全員投票完了で自動判定・クローズ（userId キーで集計）
   useEffect(() => {
     if (!activeVote?.modalOpen) return;
-    const total = participants.length;
+    const expectedIds =
+      activeVote.expectedUserIds && activeVote.expectedUserIds.length > 0
+        ? Array.from(new Set(activeVote.expectedUserIds))
+        : participants.map((p) => p.id);
+    const total = expectedIds.length;
     if (total <= 0 || !activeVote.cardId) return;
-    
+
     console.log('Vote check:', {
       total,
-      participants: participants.map(p => p.id),
+      expectedIds,
       voteMap,
       myUserId,
-      myVoteChoice
+      myVoteChoice,
+      round: activeVote.round,
     });
-    
-    const byId: Record<string, "go" | "no" | "pending"> = {};
-    for (const p of participants) {
-      const v = voteMap[p.id] as "go" | "no" | "pending" | undefined;
-      if (v) byId[p.id] = v;
+
+    const byId: Record<string, VoteChoice> = {};
+    for (const id of expectedIds) {
+      const v = voteMap[id];
+      if (v) byId[id] = v;
     }
-    // 自分のローカル選択がまだ反映されていない場合の補完
-    if (myUserId && myVoteChoice && !byId[myUserId]) byId[myUserId] = myVoteChoice;
-    
+    if (myUserId && myVoteChoice && expectedIds.includes(myUserId) && !byId[myUserId]) {
+      byId[myUserId] = myVoteChoice;
+    }
+
     const voted = Object.keys(byId).length;
     console.log('Vote progress:', { voted, total, byId });
     
@@ -563,6 +686,8 @@ export default function Play3Page() {
             modalOpen: false,
             sessionId: null,
             initiatedBy: null,
+            round: null,
+            expectedUserIds: [],
             updatedAt: serverTimestamp(),
           },
           { merge: true }
@@ -576,11 +701,50 @@ export default function Play3Page() {
     }
   }, [activeVote?.modalOpen, voteMap, participants, myVoteChoice, roomId, myUserId, userName, activeVote?.cardId]);
 
-  const startVote = async (choice: "go" | "no" | "pending", targetCardId?: string) => {
+  const startVote = async (choice: VoteChoice, targetCardId?: string) => {
     if (!roomId || typeof roomId !== "string") return;
     const cid = targetCardId || cardModal?.id;
     if (!cid) return;
     const sessionId = `${cid}-${Date.now()}`;
+    const cardRef = doc(db, "rooms", roomId, PLAY3_VOTE_COLLECTION, cid);
+    let nextRound = 1;
+    let history: Record<string, Record<string, string>> = {};
+    try {
+      const snap = await getDoc(cardRef);
+      if (snap.exists()) {
+        const data: any = snap.data();
+        const prevRound = typeof data.currentRound === "number" ? data.currentRound : 0;
+        const prevVotes: Record<string, string> = (data?.votes || {}) as any;
+        const prevHistory: Record<string, Record<string, string>> =
+          (data?.history as Record<string, Record<string, string>>) || {};
+        history = { ...prevHistory };
+        if (prevRound > 0 && Object.keys(prevVotes || {}).length > 0) {
+          const key = `y${prevRound}`;
+          history[key] = { ...(history[key] || {}), ...prevVotes };
+        }
+        nextRound = prevRound > 0 ? prevRound + 1 : 1;
+      }
+    } catch (error) {
+      console.warn("Failed to load existing play3Votes doc", error);
+    }
+    const participantIdSet = new Set(participants.map((p) => p.id));
+    if (myUserId) participantIdSet.add(myUserId);
+    const participantIds = Array.from(participantIdSet);
+    const myKey = myUserId;
+    const voteValue = formatVoteValue(nextRound, choice);
+    await setDoc(
+      cardRef,
+      {
+        cardId: cid,
+        sessionId,
+        currentRound: nextRound,
+        votes: { [myKey]: voteValue },
+        history,
+        expectedUserIds: participantIds,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
     await setDoc(
       doc(db, "rooms", roomId, "play3State", "state"),
       {
@@ -588,18 +752,10 @@ export default function Play3Page() {
         modalOpen: true,
         sessionId,
         initiatedBy: userName || "unknown",
+        round: nextRound,
+        expectedUserIds: participantIds,
         updatedAt: serverTimestamp(),
       },
-      { merge: true }
-    );
-    const myKey = myUserId;
-    await setDoc(
-      doc(db, "rooms", roomId, "play3Votes", cid),
-      {
-        sessionId,
-        updatedAt: serverTimestamp(),
-        [`votes.${myKey}`]: choice,
-      } as any,
       { merge: true }
     );
     setUiLocked(true); // 最初に押した人はロック
@@ -614,7 +770,7 @@ export default function Play3Page() {
     } catch {}
   };
 
-  const castVote = async (choice: "go" | "no" | "pending") => {
+  const castVote = async (choice: VoteChoice) => {
     if (
       !roomId ||
       typeof roomId !== "string" ||
@@ -631,12 +787,15 @@ export default function Play3Page() {
       }));
     } catch {}
     const myKey = myUserId;
+    const round = activeVote.round > 0 ? activeVote.round : 1;
+    const voteValue = formatVoteValue(round, choice);
     await setDoc(
-      doc(db, "rooms", roomId, "play3Votes", activeVote.cardId),
+      doc(db, "rooms", roomId, PLAY3_VOTE_COLLECTION, activeVote.cardId),
       {
         sessionId: activeVote.sessionId,
+        currentRound: round,
         updatedAt: serverTimestamp(),
-        [`votes.${myKey}`]: choice,
+        [`votes.${myKey}`]: voteValue,
       } as any,
       { merge: true }
     );
@@ -1503,19 +1662,19 @@ export default function Play3Page() {
                         const votedGo = myChoice === "go";
                         const votedPending = myChoice === "pending";
                         
-                        const goCount = participants.reduce((acc, p) => {
-                          const v = voteMap[p.id];
-                          const mine = p.id === myUserId ? myVoteChoice || v : v;
+                        const goCount = expectedVoteIds.reduce((acc, id) => {
+                          const v = voteMap[id];
+                          const mine = id === myUserId ? myVoteChoice || v : v;
                           return acc + (mine === "go" ? 1 : 0);
                         }, 0);
-                        const noCount = participants.reduce((acc, p) => {
-                          const v = voteMap[p.id];
-                          const mine = p.id === myUserId ? myVoteChoice || v : v;
+                        const noCount = expectedVoteIds.reduce((acc, id) => {
+                          const v = voteMap[id];
+                          const mine = id === myUserId ? myVoteChoice || v : v;
                           return acc + (mine === "no" ? 1 : 0);
                         }, 0);
-                        const pendingCount = participants.reduce((acc, p) => {
-                          const v = voteMap[p.id];
-                          const mine = p.id === myUserId ? myVoteChoice || v : v;
+                        const pendingCount = expectedVoteIds.reduce((acc, id) => {
+                          const v = voteMap[id];
+                          const mine = id === myUserId ? myVoteChoice || v : v;
                           return acc + (mine === "pending" ? 1 : 0);
                         }, 0);
 
@@ -1566,14 +1725,14 @@ export default function Play3Page() {
                         };
 
                         // 投票進捗（押したかどうかの全体統計）
-                        const votedCount = participants.reduce((acc, p) => {
-                          const v = voteMap[p.id];
-                          const mine = p.id === myUserId ? myVoteChoice || v : v;
+                        const votedCount = expectedVoteIds.reduce((acc, id) => {
+                          const v = voteMap[id];
+                          const mine = id === myUserId ? myVoteChoice || v : v;
                           return acc + (mine ? 1 : 0);
                         }, 0);
 
                         console.log('Vote UI update:', {
-                          participants: participants.length,
+                          expected: expectedVoteIds.length,
                           votedCount,
                           voteMap,
                           myUserId,
@@ -1595,7 +1754,7 @@ export default function Play3Page() {
                                 borderRadius: 8,
                               }}
                             >
-                              投票済み {votedCount}/{participants.length}
+                                投票済み {votedCount}/{expectedVoteIds.length}
                             </div>
 
                             {/* 投票開始メッセージ（理由と同じ位置に配置） */}
@@ -1642,41 +1801,14 @@ export default function Play3Page() {
                               <div
                                 style={{
                                   position: "absolute",
-                                  top: -10,
-                                  right: -8,
+                                  top: -12,
+                                  right: -12,
                                   display: "flex",
                                   zIndex: 5,
                                   pointerEvents: "none",
                                 }}
                               >
-                                {participants
-                                  .filter(
-                                    (p) =>
-                                      voteMap[p.id] === "no" ||
-                                      (p.id === myUserId && myVoteChoice === "no")
-                                  )
-                                  .map((p) => (
-                                    <span
-                                      key={p.id}
-                                      title={p.name}
-                                      style={{
-                                        width: 18,
-                                        height: 18,
-                                        borderRadius: "50%",
-                                        background: "#e2e8f0",
-                                        border: "1px solid #cbd5e1",
-                                        color: "#0f172a",
-                                        fontSize: 11,
-                                        fontWeight: 800,
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        marginLeft: -6,
-                                      }}
-                                    >
-                                      {p.name?.[0] || "?"}
-                                    </span>
-                                  ))}
+                                {renderVoteAvatars("no")}
                               </div>
                             </div>
 
@@ -1699,41 +1831,14 @@ export default function Play3Page() {
                               <div
                                 style={{
                                   position: "absolute",
-                                  top: -10,
-                                  right: -8,
+                                  top: -12,
+                                  right: -12,
                                   display: "flex",
                                   zIndex: 5,
                                   pointerEvents: "none",
                                 }}
                               >
-                                {participants
-                                  .filter(
-                                    (p) =>
-                                      voteMap[p.id] === "pending" ||
-                                      (p.id === myUserId && myVoteChoice === "pending")
-                                  )
-                                  .map((p) => (
-                                    <span
-                                      key={p.id}
-                                      title={p.name}
-                                      style={{
-                                        width: 18,
-                                        height: 18,
-                                        borderRadius: "50%",
-                                        background: "#fef3c7",
-                                        border: "1px solid #fde047",
-                                        color: "#a16207",
-                                        fontSize: 11,
-                                        fontWeight: 800,
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        marginLeft: -6,
-                                      }}
-                                    >
-                                      {p.name?.[0] || "?"}
-                                    </span>
-                                  ))}
+                                {renderVoteAvatars("pending")}
                               </div>
                             </div>
 
@@ -1756,41 +1861,14 @@ export default function Play3Page() {
                               <div
                                 style={{
                                   position: "absolute",
-                                  top: -10,
-                                  right: -8,
+                                  top: -12,
+                                  right: -12,
                                   display: "flex",
                                   zIndex: 5,
                                   pointerEvents: "none",
                                 }}
                               >
-                                {participants
-                                  .filter(
-                                    (p) =>
-                                      voteMap[p.id] === "go" ||
-                                      (p.id === myUserId && myVoteChoice === "go")
-                                  )
-                                  .map((p) => (
-                                    <span
-                                      key={p.id}
-                                      title={p.name}
-                                      style={{
-                                        width: 18,
-                                        height: 18,
-                                        borderRadius: "50%",
-                                        background: "#fee2e2",
-                                        border: "1px solid #fecaca",
-                                        color: "#991b1b",
-                                        fontSize: 11,
-                                        fontWeight: 800,
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        marginLeft: -6,
-                                      }}
-                                    >
-                                      {p.name?.[0] || "?"}
-                                    </span>
-                                  ))}
+                                {renderVoteAvatars("go")}
                               </div>
                             </div>
                           </>
