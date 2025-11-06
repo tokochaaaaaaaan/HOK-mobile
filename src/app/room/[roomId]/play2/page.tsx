@@ -21,18 +21,18 @@ type CardInfo = { id: string; title: string; src: string; backSrc: string };
 
 // アイコンの定義
 const reasonIcons = [
-  { emoji: "🍴", text: "ご当地グルメ" },
-  { emoji: "🎢", text: "スリル" },
-  { emoji: "🏃", text: "体験" },
-  { emoji: "🛍", text: "買い物" },
-  { emoji: "🖼", text: "建築・デザイン" },
-  { emoji: "🏞", text: "景色" },
-  { emoji: "⏱", text: "時間" },
-  { emoji: "💰", text: "コスパ" },
-  { emoji: "🤝", text: "友達と一緒に" },
-  { emoji: "👪", text: "家族向け" },
-  { emoji: "🧘", text: "リラックス" },
-  { emoji: "❗", text: "その他" }
+  { key: "gourmet", src: "/emoji/gourmet.svg", emoji: "🍴", text: "ご当地グルメ" },
+  { key: "thrill", src: "/emoji/thrill.svg", emoji: "🎢", text: "スリル" },
+  { key: "experience", src: "/emoji/experience.svg", emoji: "🏃", text: "体験" },
+  { key: "shopping", src: "/emoji/shopping.svg", emoji: "🛍", text: "買い物" },
+  { key: "design", src: "/emoji/design.svg", emoji: "🖼", text: "建築・デザイン" },
+  { key: "scenery", src: "/emoji/scenery.svg", emoji: "🏞", text: "景色" },
+  { key: "time", src: "/emoji/time.svg", emoji: "⏱", text: "時間" },
+  { key: "cost", src: "/emoji/cost.svg", emoji: "💰", text: "コスパ" },
+  { key: "friends", src: "/emoji/friends.svg", emoji: "🤝", text: "友達と一緒に" },
+  { key: "family", src: "/emoji/family.svg", emoji: "👪", text: "家族向け" },
+  { key: "relax", src: "/emoji/relax.svg", emoji: "🧘", text: "リラックス" },
+  { key: "other", src: "/emoji/other.svg", emoji: "❗", text: "その他" }
 ];
 
 export default function Play2Page() {
@@ -983,11 +983,10 @@ export default function Play2Page() {
                         alignItems: "center",
                         justifyContent: "center",
                         height: 60,
+                        
                       }}
                     >
-                      <div style={{ fontSize: "2.5rem" }}>
-                        {icon.emoji}
-                      </div>
+                      <img src={icon.src} alt={icon.text} width={36} height={36} style={{ display: 'block' }} />
                     </div>
                   ))}
                 </div>
