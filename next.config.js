@@ -1,6 +1,4 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+const nextConfig = {
   /* config options here */
   eslint: {
     ignoreDuringBuilds: true,
@@ -28,27 +26,14 @@ const nextConfig: NextConfig = {
         path: false,
       };
     }
-    
-    // Firebase関連のバンドリング最適化
-    config.optimization = {
-      ...config.optimization,
-      splitChunks: {
-        ...config.optimization.splitChunks,
-        cacheGroups: {
-          ...config.optimization.splitChunks?.cacheGroups,
-          firebase: {
-            test: /[\\/]node_modules[\\/](firebase|@firebase)[\\/]/,
-            name: 'firebase',
-            chunks: 'all',
-            priority: 10,
-          },
-        },
-      },
-    };
-    
+
+    // 注意: Next.jsでは optimization.splitChunks の上書きは非推奨/未サポートです。
+    // ここでの上書きは削除し、デフォルトのチャンク戦略に委ねます。
+    // （devのRSC/webpackランタイムで "reading 'call'" の不整合を誘発するため）
+
     return config;
   },
   transpilePackages: ['firebase', '@firebase/app', '@firebase/firestore', '@firebase/database', '@firebase/storage', '@firebase/auth', '@firebase/functions'],
 };
 
-export default nextConfig;
+module.exports = nextConfig;

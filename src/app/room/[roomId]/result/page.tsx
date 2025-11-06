@@ -53,16 +53,18 @@ export default function ResultPage() {
   const { roomId } = useParams();
   const [selections, setSelections] = useState<UserSelection[]>([]);
   const [goIds, setGoIds] = useState<string[]>([]);
-  const [notGoIds, setNotGoIds] = useState<string[]>([]);
+  const [noIds, setNoIds] = useState<string[]>([]);
+  const [neutralIds, setNeutralIds] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [cardModal, setCardModal] = useState<string | null>(null);
   const [overallAgreement, setOverallAgreement] = useState<number>(0);
+  const [activeUserInfo, setActiveUserInfo] = useState<string | null>(null);
+  const [userInfoExpanded, setUserInfoExpanded] = useState<Record<string, boolean>>({});
+  const [allCardsModalOpen, setAllCardsModalOpen] = useState(false);
 
-  // 初期: 全セクション展開 (後で行く/行かないだけ展開し他は閉じるも可)
+  // 初期: go/no/neutralだけ展開
   useEffect(() => {
-    const init: Record<string, boolean> = {};
-    SECTION_ORDER.forEach(s => { init[s.key] = s.key === 'go' || s.key === 'no'; });
-    setExpanded(init);
+    setExpanded({ go: true, no: true, neutral: true });
   }, []);
 
   // finalSelections 購読
@@ -92,14 +94,19 @@ export default function ResultPage() {
     return () => unsub();
   }, [roomId]);
 
-  // go/no 購読
+  // play3Assignments 購読（go/no/neutralの最終決定）
   useEffect(() => {
     if (!roomId || typeof roomId !== 'string') return;
-    const colRef = collection(db, 'rooms', roomId, 'goNo');
-    const unsub = onSnapshot(colRef, snap => {
-      const go: string[] = []; const no: string[] = [];
-      snap.docs.forEach(d => { const data: any = d.data(); if (data.status === 'go') go.push(d.id); else if (data.status === 'no') no.push(d.id); });
-      setGoIds(go); setNotGoIds(no);
+    const qAssign = query(collection(db, 'rooms', roomId, 'play3Assignments'));
+    const unsub = onSnapshot(qAssign, snap => {
+      const go: string[] = []; const no: string[] = []; const neutral: string[] = [];
+      snap.docs.forEach(d => {
+        const data: any = d.data();
+        if (data?.status === 'go') go.push(d.id);
+        else if (data?.status === 'no') no.push(d.id);
+        else if (data?.status === 'neutral') neutral.push(d.id);
+      });
+      setGoIds(go); setNoIds(no); setNeutralIds(neutral);
     });
     return () => unsub();
   }, [roomId]);
@@ -119,39 +126,10 @@ export default function ResultPage() {
     return map;
   }, [selections]);
 
-  // 各セクション表示用カード（go/no に加えて veryWant, want, dont, veryDont 間の重複を排除）
+  // 各セクション表示用カード（go/no/neutralに基づく最終決定を最優先表示）
   const sectionCards = useMemo(() => {
-    const decidedSet = new Set([...goIds, ...notGoIds]);
-    const rawVeryWant = new Set<string>();
-    const rawWant = new Set<string>();
-    const rawNeutral = new Set<string>();
-    const rawDont = new Set<string>();
-    const rawVeryDont = new Set<string>();
-    selections.forEach(sel => {
-      sel.categories.veryWant.forEach(c => rawVeryWant.add(c.id));
-      sel.categories.want.forEach(c => rawWant.add(c.id));
-      sel.categories.neutral.forEach(c => rawNeutral.add(c.id));
-      sel.categories.dont.forEach(c => rawDont.add(c.id));
-      sel.categories.veryDont.forEach(c => rawVeryDont.add(c.id));
-    });
-    // 優先順位: veryWant > want > dont > veryDont > neutral
-    const assigned = new Set<string>();
-    const veryWant: string[] = [];
-    const want: string[] = [];
-    const dont: string[] = [];
-    const veryDont: string[] = [];
-    const neutral: string[] = [];
-    const considerIds = new Set<string>([...rawVeryWant, ...rawWant, ...rawDont, ...rawVeryDont, ...rawNeutral]);
-    considerIds.forEach(id => {
-      if (decidedSet.has(id)) return; // go/no に入ったカードは除外
-      if (rawVeryWant.has(id)) { veryWant.push(id); assigned.add(id); return; }
-      if (rawWant.has(id)) { want.push(id); assigned.add(id); return; }
-      if (rawDont.has(id)) { dont.push(id); assigned.add(id); return; }
-      if (rawVeryDont.has(id)) { veryDont.push(id); assigned.add(id); return; }
-      if (rawNeutral.has(id)) { neutral.push(id); assigned.add(id); return; }
-    });
-    return { go: goIds, no: notGoIds, veryWant, want, neutral, dont, veryDont };
-  }, [selections, goIds, notGoIds]);
+    return { go: goIds, no: noIds, neutral: neutralIds };
+  }, [goIds, noIds, neutralIds]);
   const uniqueSectionCards = useMemo(() => {
     const r: Record<string, string[]> = {};
     Object.entries(sectionCards).forEach(([k, arr]) => {
@@ -161,8 +139,39 @@ export default function ResultPage() {
     });
     return r;
   }, [sectionCards]);
+
   const participantsSummary = useMemo(() => selections.map(s => s.userName).join('・'), [selections]);
   const planSummaryList = useMemo(() => selections.map(s => ({ user: s.userName, plan: s.planName })), [selections]);
+
+  // 参加者のカテゴリ別カード数を計算
+  const participantStats = useMemo(() => {
+    return selections.map(sel => ({
+      userId: sel.userId,
+      userName: sel.userName,
+      planName: sel.planName,
+      counts: {
+        veryWant: sel.categories.veryWant.length,
+        want: sel.categories.want.length,
+        neutral: sel.categories.neutral.length,
+        dont: sel.categories.dont.length,
+        veryDont: sel.categories.veryDont.length,
+      }
+    }));
+  }, [selections]);
+
+  // 全カード一覧のため、全カードに対する最終カテゴリを決定
+  const allCardsWithFinalCategory = useMemo(() => {
+    const ALL_CARDS = Array.from({ length: 40 }, (_, i) => `card${i + 1}`);
+    return ALL_CARDS.map(cardId => {
+      let finalCategory = 'unassigned';
+      if (goIds.includes(cardId)) finalCategory = 'go';
+      else if (noIds.includes(cardId)) finalCategory = 'no';
+      else if (neutralIds.includes(cardId)) finalCategory = 'neutral';
+      
+      const users = cardChoiceMap[cardId]?.users || [];
+      return { cardId, finalCategory, users };
+    });
+  }, [goIds, noIds, neutralIds, cardChoiceMap]);
 
   const getCardInfo = (id: string) => allCards.find(c => c.id === id);
 
@@ -192,9 +201,32 @@ export default function ResultPage() {
     neutral: { bg: '#e5e7eb', text: '#374151', border: '#d1d5db' },
     dont: { bg: '#bae6fd', text: '#0c4a6e', border: '#93c5fd' },
     veryDont: { bg: '#93c5fd', text: '#1e3a8a', border: '#60a5fa' },
-    go: { bg: '#ef4444', text: '#fff', border: '#b91c1c' },
-    no: { bg: '#1e3a8a', text: '#fff', border: '#334155' },
+    go: { bg: '#dc2626', text: '#fff', border: '#b91c1c' },      // 濃い赤
+    no: { bg: '#1e3a8a', text: '#fff', border: '#1e40af' },      // 濃い青
+    unassigned: { bg: '#f3f4f6', text: '#6b7280', border: '#d1d5db' },
   };
+
+  const categoryNames: Record<string, string> = {
+    veryWant: '特に行きたい',
+    want: '行きたい',
+    neutral: 'どちらでもいい',
+    dont: '行きたくない',
+    veryDont: '特に行きたくない',
+    go: '行く',
+    no: '行かない',
+    unassigned: '未分類',
+  };
+
+  // アバター表示
+  const renderAvatars = () => (
+    <div style={{ display: 'flex', gap: 8 }}>
+      {participantStats.map(p => (
+        <button key={p.userId} onClick={() => setActiveUserInfo(p.userId)} title={p.userName} style={{ width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb', background: '#fff', boxShadow: '0 2px 6px rgba(0,0,0,0.08)', fontWeight: 800, color: '#111827' }}>
+          {p.userName?.[0] || '?'}
+        </button>
+      ))}
+    </div>
+  );
 
   const renderCard = (cardId: string) => {
     const info = getCardInfo(cardId);
@@ -220,11 +252,23 @@ export default function ResultPage() {
   return (
     <div style={{ minHeight: '100vh', background: '#ffffff', padding: '32px 16px', fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ maxWidth: 1180, margin: '0 auto' }}>
+        {/* ヘッダー行 */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <button 
+            onClick={() => setAllCardsModalOpen(true)}
+            style={{ padding: '8px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, fontWeight: 700, color: '#374151', cursor: 'pointer' }}
+          >
+            全カード一覧
+          </button>
+          {renderAvatars()}
+        </div>
+
         <div style={{ marginBottom: 20, textAlign: 'center' }}>
           <h1 style={{ fontSize: 32, fontWeight: 900, letterSpacing: '.5px', margin: 0, color: '#0f172a' }}>最終結果</h1>
           <div style={{ marginTop: 8, color: '#475569', fontSize: 14 }}>参加者: {participantsSummary || '—'}</div>
           <div style={{ marginTop: 6, fontSize: 28, fontWeight: 800, backgroundImage: 'linear-gradient(135deg,#0ea5e9,#2563eb,#4f46e5)', WebkitBackgroundClip: 'text', color: 'transparent' }}>合致率 {overallAgreement.toFixed(0)}%</div>
         </div>
+
         {/* プラン一覧エリア */}
         <div style={{ margin: '0 auto 32px', maxWidth: 900, background: 'linear-gradient(135deg,#f8fafc,#ffffff)', border: '1px solid #e2e8f0', borderRadius: 18, padding: '14px 18px', boxShadow: '0 6px 18px -8px rgba(15,23,42,0.15)' }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: '#334155', marginBottom: 6, letterSpacing: '.5px' }}>各ユーザーのプラン名</div>
@@ -239,36 +283,196 @@ export default function ResultPage() {
             </div>
           ) : <div style={{ fontSize: 12, color: '#64748b' }}>データなし</div>}
         </div>
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-          {SECTION_ORDER.map(section => {
-            const cards = uniqueSectionCards[section.key] || [];
-            const open = expanded[section.key];
-            return (
-              <div key={section.key} style={{ border: `1px solid ${section.border}`, background: section.key==='no' ? 'linear-gradient(180deg,#1e3a8a,#1e40af)' : section.color, borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(15,23,42,0.25)' }}>
-                <div
-                  onClick={() => setExpanded(e => ({ ...e, [section.key]: !open }))}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer' }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div style={{ fontWeight: 900, fontSize: 18, color: section.key==='no' ? '#fff' : '#0f172a' }}>{section.label}</div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: section.key==='no' ? '#e0f2fe' : '#334155', opacity: .85 }}>{cards.length}枚</div>
-                  </div>
-                  <div style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: section.key==='no' ? '#fff' : '#334155' }}>^</div>
-                </div>
-                <div style={{ height: open ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: open ? '1px solid rgba(255,255,255,0.3)' : 'none', display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ padding: '10px 14px 20px' }}>
-                    <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
-                      {cards.length ? cards.map(renderCard) : (
-                        <div style={{ fontSize: 13, fontWeight: 600, color: section.key==='no' ? '#bfdbfe' : '#475569' }}>カードなし</div>
-                      )}
-                    </div>
-                  </div>
+          {/* 行く（濃い赤） */}
+          <div style={{ border: '2px solid #b91c1c', background: '#dc2626', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(220,38,38,0.4)' }}>
+            <div
+              onClick={() => setExpanded(e => ({ ...e, go: !expanded.go }))}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#fff' }}>行く</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#fecaca', opacity: .9 }}>{uniqueSectionCards.go?.length || 0}枚</div>
+              </div>
+              <div style={{ transform: expanded.go ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#fff' }}>^</div>
+            </div>
+            <div style={{ height: expanded.go ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.go ? '1px solid rgba(255,255,255,0.3)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '10px 14px 20px' }}>
+                <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
+                  {(uniqueSectionCards.go?.length || 0) > 0 ? uniqueSectionCards.go!.map(renderCard) : (
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#fecaca' }}>カードなし</div>
+                  )}
                 </div>
               </div>
-            );
-          })}
+            </div>
+          </div>
+
+          {/* 行かない（濃い青） */}
+          <div style={{ border: '2px solid #1e40af', background: '#1e3a8a', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(30,58,138,0.4)' }}>
+            <div
+              onClick={() => setExpanded(e => ({ ...e, no: !expanded.no }))}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#fff' }}>行かない</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#bfdbfe', opacity: .9 }}>{uniqueSectionCards.no?.length || 0}枚</div>
+              </div>
+              <div style={{ transform: expanded.no ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#fff' }}>^</div>
+            </div>
+            <div style={{ height: expanded.no ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.no ? '1px solid rgba(255,255,255,0.3)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '10px 14px 20px' }}>
+                <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
+                  {(uniqueSectionCards.no?.length || 0) > 0 ? uniqueSectionCards.no!.map(renderCard) : (
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#bfdbfe' }}>カードなし</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* どちらでもいい（灰色） */}
+          <div style={{ border: '2px solid #d1d5db', background: '#e5e7eb', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(107,114,128,0.25)' }}>
+            <div
+              onClick={() => setExpanded(e => ({ ...e, neutral: !expanded.neutral }))}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#374151' }}>どちらでもいい</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', opacity: .85 }}>{uniqueSectionCards.neutral?.length || 0}枚</div>
+              </div>
+              <div style={{ transform: expanded.neutral ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#374151' }}>^</div>
+            </div>
+            <div style={{ height: expanded.neutral ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.neutral ? '1px solid rgba(156,163,175,0.3)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '10px 14px 20px' }}>
+                <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
+                  {(uniqueSectionCards.neutral?.length || 0) > 0 ? uniqueSectionCards.neutral!.map(renderCard) : (
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>カードなし</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+      {/* 参加者情報モーダル */}
+      {activeUserInfo && (() => {
+        const user = participantStats.find(p => p.userId === activeUserInfo);
+        if (!user) return null;
+        const catOrder: Array<{key: keyof typeof user.counts; label: string}> = [
+          { key: 'veryWant', label: '特に行きたい' },
+          { key: 'want', label: '行きたい' },
+          { key: 'neutral', label: 'どちらでもいい' },
+          { key: 'dont', label: '行きたくない' },
+          { key: 'veryDont', label: '特に行きたくない' },
+        ];
+        const getList = (k: keyof typeof user.counts) => {
+          const sel = selections.find(s => s.userId === user.userId);
+          return sel ? sel.categories[k] : [];
+        };
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={() => setActiveUserInfo(null)}>
+            <div style={{ width: 420, background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }} onClick={e=>e.stopPropagation()}>
+              <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>{user.userName}</div>
+              <div style={{ color: '#374151', marginBottom: 10 }}>プラン名：<strong style={{ color: '#2563eb' }}>{user.planName || '—'}</strong></div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {catOrder.map(({key,label}) => {
+                  const expanded = !!userInfoExpanded[key as string];
+                  const toggle = () => setUserInfoExpanded(prev => ({ ...prev, [key as string]: !expanded }));
+                  const list = getList(key);
+                  return (
+                    <div key={key} style={{ border: '1px solid #e5e7eb', borderRadius: 10 }}>
+                      <div onClick={toggle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', cursor: 'pointer' }}>
+                        <div>{label}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontWeight: 800 }}>{list.length}</span>
+                          <span style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>^</span>
+                        </div>
+                      </div>
+                      {expanded && (
+                        <div style={{ padding: '8px 10px', display: 'grid', gap: 6 }}>
+                          {list.length ? list.map((c, idx) => {
+                            const info = allCards.find(x=>x.id === c.id);
+                            const reason = (c as any).reason || '';
+                            return (
+                              <div key={idx} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8 }}>
+                                <div style={{ fontWeight: 700, color: '#0f172a' }}>{info?.title || c.id}</div>
+                                <div style={{ fontSize: 12, color: reason ? '#374151' : '#94a3b8' }}>理由: {reason || '（なし）'}</div>
+                              </div>
+                            );
+                          }) : <div style={{ fontSize: 12, color: '#94a3b8' }}>カードはありません</div>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ textAlign: 'right', marginTop: 12 }}>
+                <button onClick={() => setActiveUserInfo(null)} style={{ padding: '8px 12px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontWeight: 700 }}>閉じる</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 全カード一覧モーダル */}
+      {allCardsModalOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110 }} onClick={() => setAllCardsModalOpen(false)}>
+          <div style={{ width: 'min(95vw, 1200px)', maxHeight: '90vh', background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 25px 80px rgba(0,0,0,0.35)' }} onClick={e=>e.stopPropagation()}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontWeight: 900, fontSize: 20 }}>全カード一覧</div>
+              <button onClick={() => setAllCardsModalOpen(false)} style={{ padding: '6px 12px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontWeight: 700 }}>閉じる</button>
+            </div>
+            <div style={{ padding: 20, overflowY: 'auto', maxHeight: 'calc(90vh - 80px)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+                {allCardsWithFinalCategory.map(({ cardId, finalCategory, users }) => {
+                  const info = getCardInfo(cardId);
+                  const finalStyle = categoryChipStyle[finalCategory] || categoryChipStyle.unassigned;
+                  return (
+                    <div key={cardId} style={{ border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+                      <div style={{ width: '100%', aspectRatio: '3/2', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <img src={info?.src} alt={info?.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </div>
+                      <div style={{ padding: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <div style={{ fontWeight: 800, color: '#0f172a' }}>{info?.title}</div>
+                          <div style={{ background: finalStyle.bg, color: finalStyle.text, border: `1px solid ${finalStyle.border}`, borderRadius: 9999, padding: '2px 8px', fontSize: 11, fontWeight: 800 }}>
+                            {categoryNames[finalCategory]}
+                          </div>
+                        </div>
+                        <div style={{ display: 'grid', gap: 6 }}>
+                          {users.length > 0 ? users.map(u => {
+                            const style = categoryChipStyle[u.category] || categoryChipStyle.neutral;
+                            const showReason = u.reason && (u.category === 'veryWant' || u.category === 'veryDont');
+                            return (
+                              <div key={u.userId} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 8 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                  <div style={{ fontWeight: 700, fontSize: 12, color: '#0f172a' }}>{u.userName}</div>
+                                  <div style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}`, borderRadius: 9999, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>
+                                    {categoryNames[u.category]}
+                                  </div>
+                                </div>
+                                {showReason && (
+                                  <div style={{ fontSize: 10, color: '#475569', lineHeight: 1.3 }}>
+                                    理由: {u.reason || '（なし）'}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }) : (
+                            <div style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>誰も選択していません</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* カードモーダル */}
       {cardModal && (() => {
         const info = getCardInfo(cardModal);
@@ -290,7 +494,7 @@ export default function ResultPage() {
                         <div key={u.userId} style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                             <div style={{ fontWeight: 800, color: '#0f172a' }}>{u.userName}</div>
-                            <div style={{ background: st.bg, color: st.text, border: `1px solid ${st.border}`, borderRadius: 9999, padding: '2px 10px', fontSize: 12, fontWeight: 800 }}>{SECTION_ORDER.find(s => s.key === u.category)?.label || u.category}</div>
+                            <div style={{ background: st.bg, color: st.text, border: `1px solid ${st.border}`, borderRadius: 9999, padding: '2px 10px', fontSize: 12, fontWeight: 800 }}>{categoryNames[u.category] || u.category}</div>
                           </div>
                           <div style={{ fontSize: 12, color: showReason ? '#334155' : '#94a3b8', fontWeight: 600, lineHeight: 1.4 }}>
                             {showReason ? (u.reason || '') : '（理由なし / 特に系以外）'}

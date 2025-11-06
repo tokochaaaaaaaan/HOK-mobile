@@ -2,6 +2,22 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+### Prerequisites (Node.js)
+
+This project uses Next.js 15 and React 19. Please use an LTS Node.js version compatible with Next 15:
+
+- Recommended: Node 22.x LTS (also works with Node 20.x LTS)
+- Not supported: Node 23 (will throw ERR_INVALID_PACKAGE_CONFIG for some compiled packages)
+
+If you use nvm, run:
+
+```bash
+nvm install 22
+nvm use 22
+```
+
+An `.nvmrc` file is included, so simply running `nvm use` in the project root will select the correct version.
+
 First, run the development server:
 
 ```bash
