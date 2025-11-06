@@ -1095,7 +1095,7 @@ export default function Play3Page() {
                     {user?.userName}
                   </div>
                   <div style={{ color: "#374151", marginBottom: 10 }}>
-                    プラン名：<strong style={{ color: "#2563eb" }}>
+                    プラン名：<strong style={{ color: "#000000" }}>
                       {user?.planName || "—"}
                     </strong>
                   </div>
@@ -1164,7 +1164,7 @@ export default function Play3Page() {
                                       <div
                                         style={{
                                           fontSize: 12,
-                                          color: reason ? "#374151" : "#94a3b8",
+                                          color: reason ? "#000000" : "#94a3b8",
                                         }}
                                       >
                                         理由: {reason || "（なし）"}
@@ -1308,7 +1308,20 @@ export default function Play3Page() {
                           <div
                             key={idx}
                             style={{
-                              border: "1px solid #e5e7eb",
+                              border: 
+                                u.category === "veryWant" ? "2px solid #fca5a5" :
+                                u.category === "want" ? "2px solid #fbcfe8" :
+                                u.category === "neutral" ? "2px solid #d1d5db" :
+                                u.category === "dont" ? "2px solid #93c5fd" :
+                                u.category === "veryDont" ? "2px solid #60a5fa" :
+                                "1px solid #e5e7eb",
+                              background:
+                                u.category === "veryWant" ? "#fecaca" :
+                                u.category === "want" ? "#fce7f3" :
+                                u.category === "neutral" ? "#e5e7eb" :
+                                u.category === "dont" ? "#bae6fd" :
+                                u.category === "veryDont" ? "#93c5fd" :
+                                "#fff",
                               borderRadius: 10,
                               padding: 8,
                             }}
@@ -1325,7 +1338,7 @@ export default function Play3Page() {
                                 style={{
                                   fontSize: 12,
                                   fontWeight: 800,
-                                  color: "#2563eb",
+                                  color: "#000000",
                                 }}
                               >
                                 プラン名：{u.planName}
@@ -1342,7 +1355,17 @@ export default function Play3Page() {
                             >
                               <div>
                                 カテゴリ：
-                                <strong>
+                                <strong
+                                  style={{
+                                    color: 
+                                      u.category === "veryWant" ? "#7f1d1d" :
+                                      u.category === "want" ? "#9d174d" :
+                                      u.category === "neutral" ? "#374151" :
+                                      u.category === "dont" ? "#0c4a6e" :
+                                      u.category === "veryDont" ? "#1e3a8a" :
+                                      "#374151"
+                                  }}
+                                >
                                   {
                                     ({
                                       veryWant: "特に行きたい",
@@ -1356,7 +1379,7 @@ export default function Play3Page() {
                               </div>
                               <div
                                 style={{
-                                  color: u.reason ? "#374151" : "#94a3b8",
+                                  color: "#000000",
                                   marginLeft: "auto",
                                 }}
                               >
@@ -1520,6 +1543,31 @@ export default function Play3Page() {
                             >
                               投票済み {votedCount}/{participants.length}
                             </div>
+
+                            {/* 投票開始メッセージ（理由と同じ位置に配置） */}
+                            {activeVote?.modalOpen && (
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  top: -50,
+                                  right: -370,
+                                  fontSize: 12,
+                                  fontWeight: 800,
+                                  color: "#059669",
+                                  background: "rgba(5, 150, 105, 0.1)",
+                                  padding: "8px 16px",
+                                  borderRadius: 8,
+                                  border: "1px solid #10b981",
+                                  textAlign: "center",
+                                  boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                                  width: "220px",
+                                  zIndex: 10,
+                                  marginLeft: "auto",
+                                }}
+                              >
+                                {activeVote.initiatedBy}さんが投票を開始しました。
+                              </div>
+                            )}
 
                             <div style={{ position: "relative" }}>
                               <button
