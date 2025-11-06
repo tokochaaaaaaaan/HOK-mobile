@@ -61,6 +61,7 @@ export default function ResultPage() {
   const [activeUserInfo, setActiveUserInfo] = useState<string | null>(null);
   const [userInfoExpanded, setUserInfoExpanded] = useState<Record<string, boolean>>({});
   const [allCardsModalOpen, setAllCardsModalOpen] = useState(false);
+  const [categoryDetailModal, setCategoryDetailModal] = useState<{ userId: string; category: string } | null>(null);
 
   // 初期: go/no/neutralだけ展開
   useEffect(() => {
@@ -76,10 +77,11 @@ export default function ResultPage() {
       snap.docs.forEach(d => {
         const data = d.data() as FinalSelectionDoc;
         const norm = normalizeCategories(data.categories || {});
+        console.log('Final selection data:', data); // デバッグログ
          list.push({
            userId: data.userId || d.id,
            userName: data.userName || data.userId || d.id,
-           planName: data.planName || '',
+           planName: data.planName || 'プラン名未設定',
            categories: {
              veryWant: (norm.verywant || []).map((c: any) => ({ id: c.id, reason: c.reason })),
              want: (norm.want || []).map((c: any) => ({ id: c.id })),
@@ -89,6 +91,7 @@ export default function ResultPage() {
            }
          });
       });
+      console.log('Processed selections:', list); // デバッグログ
       setSelections(list);
     });
     return () => unsub();
@@ -135,7 +138,13 @@ export default function ResultPage() {
     Object.entries(sectionCards).forEach(([k, arr]) => {
       const seen = new Set<string>();
       r[k] = [];
-      arr.forEach(id => { if (!seen.has(id)) { seen.add(id); r[k].push(id); } });
+      // カード番号順にソート（card1, card2, card3...）
+      const sortedArr = [...arr].sort((a, b) => {
+        const numA = parseInt(a.replace('card', ''), 10);
+        const numB = parseInt(b.replace('card', ''), 10);
+        return numA - numB;
+      });
+      sortedArr.forEach(id => { if (!seen.has(id)) { seen.add(id); r[k].push(id); } });
     });
     return r;
   }, [sectionCards]);
@@ -170,8 +179,19 @@ export default function ResultPage() {
       
       const users = cardChoiceMap[cardId]?.users || [];
       return { cardId, finalCategory, users };
+    }).sort((a, b) => {
+      // カード番号順にソート（card1, card2, card3...）
+      const numA = parseInt(a.cardId.replace('card', ''), 10);
+      const numB = parseInt(b.cardId.replace('card', ''), 10);
+      return numA - numB;
     });
   }, [goIds, noIds, neutralIds, cardChoiceMap]);
+
+  const closeUserInfoModal = () => {
+    setActiveUserInfo(null);
+    setUserInfoExpanded({}); // 全ての展開状態をリセット
+    setCategoryDetailModal(null); // カテゴリ詳細モーダルも閉じる
+  };
 
   const getCardInfo = (id: string) => allCards.find(c => c.id === id);
 
@@ -274,10 +294,12 @@ export default function ResultPage() {
           <div style={{ fontSize: 13, fontWeight: 800, color: '#334155', marginBottom: 6, letterSpacing: '.5px' }}>各ユーザーのプラン名</div>
           {planSummaryList.length ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-              {planSummaryList.map(p => (
-                <div key={p.user} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 9999, padding: '4px 14px', fontSize: 12, fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {planSummaryList.map((p, index) => (
+                <div key={`${p.user}-${index}`} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 9999, padding: '4px 14px', fontSize: 12, fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span>{p.user}</span>
-                  <span style={{ color: p.plan ? '#475569' : '#94a3b8' }}>{p.plan || '—'}</span>
+                  <span style={{ color: (p.plan && p.plan !== 'プラン名未設定') ? '#475569' : '#94a3b8' }}>
+                    {(p.plan && p.plan !== 'プラン名未設定') ? p.plan : '—'}
+                  </span>
                 </div>
               ))}
             </div>
@@ -371,44 +393,34 @@ export default function ResultPage() {
           return sel ? sel.categories[k] : [];
         };
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={() => setActiveUserInfo(null)}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={closeUserInfoModal}>
             <div style={{ width: 420, background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }} onClick={e=>e.stopPropagation()}>
               <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>{user.userName}</div>
-              <div style={{ color: '#374151', marginBottom: 10 }}>プラン名：<strong style={{ color: '#2563eb' }}>{user.planName || '—'}</strong></div>
+              <div style={{ color: '#374151', marginBottom: 10 }}>プラン名：<strong style={{ color: '#2563eb' }}>
+                {(user.planName && user.planName !== 'プラン名未設定') ? user.planName : '—'}
+              </strong></div>
               <div style={{ display: 'grid', gap: 8 }}>
                 {catOrder.map(({key,label}) => {
-                  const expanded = !!userInfoExpanded[key as string];
-                  const toggle = () => setUserInfoExpanded(prev => ({ ...prev, [key as string]: !expanded }));
                   const list = getList(key);
+                  const categoryStyle = categoryChipStyle[key as string] || categoryChipStyle.neutral;
                   return (
-                    <div key={key} style={{ border: '1px solid #e5e7eb', borderRadius: 10 }}>
-                      <div onClick={toggle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', cursor: 'pointer' }}>
-                        <div>{label}</div>
+                    <div key={key} style={{ border: `1px solid ${categoryStyle.border}`, borderRadius: 10, background: categoryStyle.bg }}>
+                      <div 
+                        onClick={() => setCategoryDetailModal({ userId: user.userId, category: key as string })} 
+                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', cursor: 'pointer' }}
+                      >
+                        <div style={{ color: categoryStyle.text, fontWeight: 700 }}>{label}</div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <span style={{ fontWeight: 800 }}>{list.length}</span>
-                          <span style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>^</span>
+                          <span style={{ fontWeight: 800, color: categoryStyle.text }}>{list.length}</span>
+                          <span style={{ color: categoryStyle.text }}>^</span>
                         </div>
                       </div>
-                      {expanded && (
-                        <div style={{ padding: '8px 10px', display: 'grid', gap: 6 }}>
-                          {list.length ? list.map((c, idx) => {
-                            const info = allCards.find(x=>x.id === c.id);
-                            const reason = (c as any).reason || '';
-                            return (
-                              <div key={idx} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8 }}>
-                                <div style={{ fontWeight: 700, color: '#0f172a' }}>{info?.title || c.id}</div>
-                                <div style={{ fontSize: 12, color: reason ? '#374151' : '#94a3b8' }}>理由: {reason || '（なし）'}</div>
-                              </div>
-                            );
-                          }) : <div style={{ fontSize: 12, color: '#94a3b8' }}>カードはありません</div>}
-                        </div>
-                      )}
                     </div>
                   );
                 })}
               </div>
               <div style={{ textAlign: 'right', marginTop: 12 }}>
-                <button onClick={() => setActiveUserInfo(null)} style={{ padding: '8px 12px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontWeight: 700 }}>閉じる</button>
+                <button onClick={closeUserInfoModal} style={{ padding: '8px 12px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontWeight: 700 }}>閉じる</button>
               </div>
             </div>
           </div>
@@ -472,6 +484,123 @@ export default function ResultPage() {
           </div>
         </div>
       )}
+
+      {/* カテゴリ詳細モーダル */}
+      {categoryDetailModal && (() => {
+        const user = participantStats.find(p => p.userId === categoryDetailModal.userId);
+        const selection = selections.find(s => s.userId === categoryDetailModal.userId);
+        if (!user || !selection) return null;
+        
+        const categoryKey = categoryDetailModal.category as keyof typeof selection.categories;
+        const categoryList = selection.categories[categoryKey] || [];
+        const categoryStyle = categoryChipStyle[categoryDetailModal.category] || categoryChipStyle.neutral;
+        const categoryName = categoryNames[categoryDetailModal.category] || categoryDetailModal.category;
+        
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 120 }} onClick={() => setCategoryDetailModal(null)}>
+            <div style={{ width: 'min(95vw, 1000px)', maxHeight: '90vh', background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 25px 80px rgba(0,0,0,0.4)' }} onClick={e=>e.stopPropagation()}>
+              <div style={{ 
+                padding: '16px 20px', 
+                borderBottom: `3px solid ${categoryStyle.border}`, 
+                background: categoryStyle.bg,
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center' 
+              }}>
+                <div>
+                  <div style={{ fontWeight: 900, fontSize: 18, color: categoryStyle.text }}>{user.userName} - {categoryName}</div>
+                  <div style={{ fontSize: 14, color: categoryStyle.text, opacity: 0.8 }}>{categoryList.length}枚のカード</div>
+                </div>
+                <button 
+                  onClick={() => setCategoryDetailModal(null)} 
+                  style={{ 
+                    padding: '6px 12px', 
+                    border: `1px solid ${categoryStyle.border}`, 
+                    borderRadius: 8, 
+                    background: '#fff', 
+                    fontWeight: 700,
+                    color: categoryStyle.text
+                  }}
+                >
+                  閉じる
+                </button>
+              </div>
+              <div style={{ padding: 20, overflowY: 'auto', maxHeight: 'calc(90vh - 100px)' }}>
+                {categoryList.length > 0 ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+                    {categoryList.map((card, index) => {
+                      const info = getCardInfo(card.id);
+                      const reason = (card as any).reason || '';
+                      const showReason = reason && (categoryDetailModal.category === 'veryWant' || categoryDetailModal.category === 'veryDont');
+                      
+                      return (
+                        <div key={index} style={{ 
+                          border: `2px solid ${categoryStyle.border}`, 
+                          borderRadius: 12, 
+                          overflow: 'hidden', 
+                          background: '#fff',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                        }}>
+                          <div style={{ width: '100%', aspectRatio: '3/2', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <img src={info?.src} alt={info?.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </div>
+                          <div style={{ padding: 12 }}>
+                            <div style={{ 
+                              fontWeight: 800, 
+                              fontSize: 16, 
+                              color: '#0f172a', 
+                              marginBottom: 8,
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <span>{info?.title}</span>
+                              <div style={{ 
+                                background: categoryStyle.bg, 
+                                color: categoryStyle.text, 
+                                border: `1px solid ${categoryStyle.border}`, 
+                                borderRadius: 9999, 
+                                padding: '2px 8px', 
+                                fontSize: 11, 
+                                fontWeight: 800 
+                              }}>
+                                {categoryName}
+                              </div>
+                            </div>
+                            {showReason && (
+                              <div style={{ 
+                                background: '#f8fafc', 
+                                border: '1px solid #e2e8f0', 
+                                borderRadius: 8, 
+                                padding: 8,
+                                marginTop: 8
+                              }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', marginBottom: 4 }}>理由:</div>
+                                <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.4 }}>
+                                  {reason || '（理由なし）'}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ 
+                    textAlign: 'center', 
+                    padding: '40px 20px', 
+                    color: '#6b7280',
+                    fontSize: 16 
+                  }}>
+                    このカテゴリにはカードがありません
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* カードモーダル */}
       {cardModal && (() => {

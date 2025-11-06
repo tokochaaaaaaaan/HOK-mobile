@@ -177,7 +177,6 @@ export default function WaitingPage() {
   const [selfReady, setSelfReady] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [interactionLocked, setInteractionLocked] = useState(false);
-  const [navigatedToResult, setNavigatedToResult] = useState(false);
 
   useEffect(() => {
     if (!roomId || !userName) return;
@@ -190,13 +189,16 @@ export default function WaitingPage() {
         if ((dat as any).isReady) { setSelfReady(true); setInteractionLocked(true); }
         const cat = (dat?.categories || {}) as Partial<Categories>;
         const build = (k: CategoryType) =>
-          (cat[k] || []).map((x: any) => ({
-            id: x.id,
-            title: x.title,
-            src: x.src,
-            backSrc: x.backSrc,
-            reason: x.reason || "",
-          })) as CardWithReason[];
+          (cat[k] || []).map((x: any) => {
+            const fullCardInfo = allCards.find(c => c.id === x.id);
+            return {
+              id: x.id,
+              title: fullCardInfo?.title || x.title || `カード${x.id.replace('card', '')}`,
+              src: fullCardInfo?.src || x.src || `/pngs/USJ_${x.id.replace('card', '')}_surface-1.png`,
+              backSrc: fullCardInfo?.backSrc || x.backSrc || `/pngs/back/USJ_${x.id.replace('card', '')}_back-1.png`,
+              reason: x.reason || "",
+            };
+          }) as CardWithReason[];
         setCategories(
           normalizeCategories({
             veryWant: build("veryWant"),
@@ -255,17 +257,49 @@ export default function WaitingPage() {
   const saveCategories = useCallback(
     async (next: Categories) => {
       if (!roomId || !userName) return;
-      const ref = doc(db, "rooms", roomId, "finalSelections", userName);
-      await setDoc(ref, {
-        user: userName,
-        userId: userName,
-        userName,
-        categories: next,
-        planname: planName || "",
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      setIsSaving(true);
+      try {
+        // カード情報を完全に保持するため、allCardsから情報を補完
+        const enhanceCategory = (category: CardWithReason[]) => {
+          return category.map(card => {
+            const fullCardInfo = allCards.find(c => c.id === card.id);
+            return {
+              id: card.id,
+              title: fullCardInfo?.title || card.title || `カード${card.id.replace('card', '')}`,
+              src: fullCardInfo?.src || card.src || `/pngs/USJ_${card.id.replace('card', '')}_surface-1.png`,
+              backSrc: fullCardInfo?.backSrc || card.backSrc || `/pngs/back/USJ_${card.id.replace('card', '')}_back-1.png`,
+              reason: card.reason || ""
+            };
+          });
+        };
+
+        const enhancedNext = {
+          veryWant: enhanceCategory(next.veryWant),
+          want: enhanceCategory(next.want),
+          neutral: enhanceCategory(next.neutral),
+          dont: enhanceCategory(next.dont),
+          veryDont: enhanceCategory(next.veryDont),
+        };
+
+        const ref = doc(db, "rooms", roomId, "finalSelections", userName);
+        await setDoc(ref, {
+          user: userName,
+          userId: userName,
+          userName,
+          categories: enhancedNext,
+          planname: planName || "",
+          planName: planName || "", // 両方の形式で保存
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+        
+        console.log('Categories saved successfully:', enhancedNext);
+      } catch (error) {
+        console.error('Error saving categories:', error);
+      } finally {
+        setIsSaving(false);
+      }
     },
-    [roomId, userName, planName]
+    [roomId, userName, planName, allCards]
   );
 
   // --- クリックピック状態 ---
@@ -414,21 +448,27 @@ export default function WaitingPage() {
 
     // 元に戻す：originalFrom があればそこへ、無ければ現状維持でモーダルを閉じる
     if (originalFrom) {
+      // カードの完全な情報を保持して元のカテゴリに戻す
+      const fullCardInfo = allCards.find(c => c.id === card.id);
+      const restoredCard = {
+        id: card.id,
+        title: fullCardInfo?.title || card.title || `カード${card.id.replace('card', '')}`,
+        src: fullCardInfo?.src || card.src || `/pngs/USJ_${card.id.replace('card', '')}_surface-1.png`,
+        backSrc: fullCardInfo?.backSrc || card.backSrc || `/pngs/back/USJ_${card.id.replace('card', '')}_back-1.png`,
+        // 理由は除去（通常カテゴリに戻すため）
+      };
+
       const base = removeFromCategory(card.id, category, categories);
-      const next = addToCategory(
-        { id: card.id, title: card.title, src: card.src, backSrc: card.backSrc },
-        originalFrom,
-        base
-      );
+      const next = addToCategory(restoredCard, originalFrom, base);
       const normalized = normalizeCategories(next);
       setCategories(normalized);
       saveCategories(normalized);
     }
     closeReasonModal();
-  }, [reasonModal, categories, removeFromCategory, addToCategory, saveCategories]);
+  }, [reasonModal, categories, removeFromCategory, addToCategory, saveCategories, allCards]);
 
   // ------- 理由モーダル：決定 -------
-  const confirmReason = useCallback(() => {
+  const confirmReason = useCallback(async () => {
     const { card, category, selectedIcon, customReason } = reasonModal;
     if (!card || !category) return closeReasonModal();
 
@@ -437,29 +477,47 @@ export default function WaitingPage() {
       return (customReason || "").trim();
     })();
 
+    // カードの完全な情報を保持
+    const fullCardInfo = allCards.find(c => c.id === card.id);
+    const updatedCard = {
+      id: card.id,
+      title: fullCardInfo?.title || card.title || `カード${card.id.replace('card', '')}`,
+      src: fullCardInfo?.src || card.src || `/pngs/USJ_${card.id.replace('card', '')}_surface-1.png`,
+      backSrc: fullCardInfo?.backSrc || card.backSrc || `/pngs/back/USJ_${card.id.replace('card', '')}_back-1.png`,
+      reason: reasonText,
+    };
+
     const base = removeFromCategory(card.id, category, categories);
-    const next = addToCategory({ ...card, reason: reasonText }, category, base);
+    const next = addToCategory(updatedCard, category, base);
     const normalized = normalizeCategories(next);
     setCategories(normalized);
-    saveCategories(normalized);
+    await saveCategories(normalized);
     closeReasonModal();
-  }, [reasonModal, categories, removeFromCategory, addToCategory, saveCategories]);
+  }, [reasonModal, categories, removeFromCategory, addToCategory, saveCategories, allCards]);
 
   // ------- 確認ダイアログ：理由を消して移動 -------
   const confirmDropWithoutReason = useCallback(() => {
     const { card, originalCategory, targetCategory } = confirmDialog;
     if (!card || !originalCategory || !targetCategory) return;
 
-    // 元カテゴリから削除 → 理由なしで target へ
+    // カードの完全な情報を保持して理由なしで target へ移動
+    const fullCardInfo = allCards.find(c => c.id === card.id);
+    const movedCard = {
+      id: card.id,
+      title: fullCardInfo?.title || card.title || `カード${card.id.replace('card', '')}`,
+      src: fullCardInfo?.src || card.src || `/pngs/USJ_${card.id.replace('card', '')}_surface-1.png`,
+      backSrc: fullCardInfo?.backSrc || card.backSrc || `/pngs/back/USJ_${card.id.replace('card', '')}_back-1.png`,
+      // 理由は除去（通常カテゴリなので）
+    };
+
     const base = removeFromCategory(card.id, originalCategory, categories);
-    const { reason, ...rest } = card as any;
-    const next = addToCategory(rest, targetCategory, base);
+    const next = addToCategory(movedCard, targetCategory, base);
     const normalized = normalizeCategories(next);
     setCategories(normalized);
     saveCategories(normalized);
     setConfirmDialog({ isOpen: false, card: null, originalCategory: null, targetCategory: null });
     setPicked({ card: null, from: null });
-  }, [confirmDialog, categories, removeFromCategory, addToCategory, saveCategories]);
+  }, [confirmDialog, categories, removeFromCategory, addToCategory, saveCategories, allCards]);
 
   const cancelConfirmDialog = () =>
     setConfirmDialog({ isOpen: false, card: null, originalCategory: null, targetCategory: null });
@@ -625,23 +683,10 @@ export default function WaitingPage() {
       }, { merge: true });
       setSelfReady(true);
       setInteractionLocked(true);
-      // 遷移は「全員が準備完了」時のみ。ここでは遷移させない。
     } finally {
       setIsSaving(false);
     }
-  }, [roomId, userName, categories, planName, selfReady, isSaving, router, navigatedToResult]);
-
-  // 全員準備完了時は自動で合致率ページへ遷移（小さな支援的改善）
-  useEffect(() => {
-    if (!roomId) return;
-    if (navigatedToResult) return;
-    const readyCount = Object.values(matchReadyData).filter(Boolean).length;
-    const total = Object.keys(participants).length || 0;
-    if (total > 0 && readyCount === total) {
-      setNavigatedToResult(true);
-      router.push(`/room/${roomId}/match-result`);
-    }
-  }, [roomId, matchReadyData, participants, router, navigatedToResult]);
+  }, [roomId, userName, categories, planName, selfReady, isSaving]);
 
   if (!isHydrated) return <div style={{ padding: 24 }}>読み込み中…</div>;
 
@@ -664,7 +709,7 @@ export default function WaitingPage() {
           <div style={{ marginTop: 6, fontSize: 18, color: "#2563eb", fontWeight: 600 }}>ユーザー名：{userName}</div>
           {/* プラン名 */}
           <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 12 }}>
-            <span style={{ fontSize: 16, color: "#374151", fontWeight: 600 }}>プラン名：</span>
+            <span style={{ fontSize: 16, color: "#374151", fontWeight: 600 }}>プラン名:</span>
             <input
               value={planName}
               onChange={(e) => setPlanName(e.target.value)}

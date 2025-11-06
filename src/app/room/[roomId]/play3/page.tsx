@@ -146,10 +146,11 @@ export default function Play3Page() {
       presentIds && presentIds.length
         ? presentIds.reduce((acc, id) => acc + (play3Ready[id] ? 1 : 0), 0)
         : Object.values(play3Ready).filter(Boolean).length;
-    if (totalParticipants > 0 && readyCount === totalParticipants && vsIds.length === 0) {
+    const participantCount = participants.length;
+    if (participantCount > 0 && readyCount === participantCount && vsIds.length === 0) {
       router.push(`/room/${roomId}/result`);
     }
-  }, [play3Ready, totalParticipants, vsIds.length, router, roomId, presentIds]);
+  }, [play3Ready, participants.length, vsIds.length, router, roomId, presentIds, participants]);
 
   // finalSelections 購読
   useEffect(() => {
@@ -461,6 +462,15 @@ export default function Play3Page() {
     if (!activeVote?.modalOpen) return;
     const total = participants.length;
     if (total <= 0 || !activeVote.cardId) return;
+    
+    console.log('Vote check:', {
+      total,
+      participants: participants.map(p => p.id),
+      voteMap,
+      myUserId,
+      myVoteChoice
+    });
+    
     const byId: Record<string, "go" | "no"> = {};
     for (const p of participants) {
       const v = voteMap[p.id] as "go" | "no" | undefined;
@@ -468,11 +478,16 @@ export default function Play3Page() {
     }
     // 自分のローカル選択がまだ反映されていない場合の補完
     if (myUserId && myVoteChoice && !byId[myUserId]) byId[myUserId] = myVoteChoice;
+    
     const voted = Object.keys(byId).length;
+    console.log('Vote progress:', { voted, total, byId });
+    
     if (voted >= total) {
       const votes = Object.values(byId);
       const allGo = votes.every((v) => v === "go");
       const allNo = votes.every((v) => v === "no");
+      console.log('Vote completed:', { votes, allGo, allNo });
+      
       (async () => {
         if (allGo)
           await setDoc(
@@ -518,7 +533,7 @@ export default function Play3Page() {
         closeCard();
       })();
     }
-  }, [activeVote?.modalOpen, voteMap, participants, myVoteChoice, roomId, myUserId, userName]);
+  }, [activeVote?.modalOpen, voteMap, participants, myVoteChoice, roomId, myUserId, userName, activeVote?.cardId]);
 
   const startVote = async (choice: "go" | "no", targetCardId?: string) => {
     if (!roomId || typeof roomId !== "string") return;
@@ -1474,11 +1489,19 @@ export default function Play3Page() {
                         };
 
                         // 投票進捗（押したかどうかの全体統計）
-                        const votedCount = displayParticipants.reduce((acc, p) => {
+                        const votedCount = participants.reduce((acc, p) => {
                           const v = voteMap[p.id];
                           const mine = p.id === myUserId ? myVoteChoice || v : v;
                           return acc + (mine ? 1 : 0);
                         }, 0);
+
+                        console.log('Vote UI update:', {
+                          participants: participants.length,
+                          votedCount,
+                          voteMap,
+                          myUserId,
+                          myVoteChoice
+                        });
 
                         return (
                           <>
@@ -1495,7 +1518,7 @@ export default function Play3Page() {
                                 borderRadius: 8,
                               }}
                             >
-                              投票済み {votedCount}/{totalParticipants}
+                              投票済み {votedCount}/{participants.length}
                             </div>
 
                             <div style={{ position: "relative" }}>
@@ -1512,7 +1535,7 @@ export default function Play3Page() {
                                 }
                                 style={noStyle}
                               >
-                                行かない {noCount}/{totalParticipants}
+                                行かない {noCount}/{participants.length}
                               </button>
                               <div
                                 style={{
@@ -1524,7 +1547,7 @@ export default function Play3Page() {
                                   pointerEvents: "none",
                                 }}
                               >
-                                {displayParticipants
+                                {participants
                                   .filter(
                                     (p) =>
                                       voteMap[p.id] === "no" ||
@@ -1581,7 +1604,7 @@ export default function Play3Page() {
                                   pointerEvents: "none",
                                 }}
                               >
-                                {displayParticipants
+                                {participants
                                   .filter(
                                     (p) =>
                                       voteMap[p.id] === "go" ||
