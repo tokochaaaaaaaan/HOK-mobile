@@ -186,69 +186,126 @@ export default function Play3Page() {
 
   // presence を優先して参加者を決定（未取得時は selections をフォールバック）
   const participants = useMemo(() => {
-    // シンプルなバージョンに変更してテスト
-    const uniqueParticipants = new Map<string, { id: string; name: string; plan: string }>();
-    
-    // 1. roomParticipantsから追加
-    roomParticipants.forEach((p) => {
-      if (p.id && p.name) {
-        uniqueParticipants.set(p.id, { 
-          id: p.id, 
-          name: p.name, 
-          plan: "" 
-        });
+    const map = new Map<string, { id: string; name: string; plan: string }>();
+
+    const ensure = (
+      rawId?: string | null,
+      nameHint?: string | null,
+      planHint?: string | null
+    ) => {
+      const trimmedId = rawId?.trim();
+      if (!trimmedId) return null;
+      const resolvedName = nameHint?.trim();
+      const resolvedPlan = planHint || "";
+      const existing = map.get(trimmedId);
+      if (existing) {
+        let nextName = existing.name;
+        let nextPlan = existing.plan;
+        if (
+          resolvedName &&
+          (existing.name === existing.id || existing.name.trim().length === 0)
+        ) {
+          nextName = resolvedName;
+        }
+        if (!nextPlan && resolvedPlan) {
+          nextPlan = resolvedPlan;
+        }
+        if (nextName !== existing.name || nextPlan !== existing.plan) {
+          map.set(trimmedId, { id: trimmedId, name: nextName, plan: nextPlan });
+        }
+        return trimmedId;
       }
-    });
-    
-    // 2. selectionsから追加（重複チェック）
-    selections.forEach((s) => {
-      if (s.userId && s.userName && !uniqueParticipants.has(s.userId)) {
-        uniqueParticipants.set(s.userId, {
-          id: s.userId,
-          name: s.userName,
-          plan: s.planName || ""
-        });
-      }
-    });
-    
-    // 3. presentIdsがあればそれでフィルタ
-    if (presentIds && presentIds.length > 0) {
-      const presentParticipants = Array.from(uniqueParticipants.values())
-        .filter(p => presentIds.includes(p.id));
-      
-      console.log('Participants calculation:', {
-        roomParticipants,
-        selections,
-        presentIds,
-        uniqueParticipants: Array.from(uniqueParticipants.values()),
-        presentParticipants,
-        finalResult: presentParticipants
+      map.set(trimmedId, {
+        id: trimmedId,
+        name: resolvedName || trimmedId,
+        plan: resolvedPlan
       });
-      
-      return presentParticipants;
-    }
-    
-    const result = Array.from(uniqueParticipants.values());
-    
-    console.log('Participants calculation (no presentIds):', {
-      roomParticipants,
-      selections,
-      presentIds,
-      uniqueParticipants: result,
-      finalResult: result
+      return trimmedId;
+    };
+
+    const resolveFromAny = (raw?: string | null, planHint?: string | null) => {
+      const trimmed = raw?.trim();
+      if (!trimmed) return null;
+      if (map.has(trimmed)) return trimmed;
+
+      const roomMatch = roomParticipants.find(
+        (p) => p.id === trimmed || p.name === trimmed
+      );
+      if (roomMatch) {
+        return ensure(roomMatch.id, roomMatch.name, planHint);
+      }
+
+      const selectionMatch = selections.find(
+        (s) =>
+          s.userId === trimmed ||
+          s.user === trimmed ||
+          s.userName === trimmed
+      );
+      if (selectionMatch) {
+        const id = selectionMatch.userId || selectionMatch.user || trimmed;
+        const name =
+          selectionMatch.userName ||
+          selectionMatch.user ||
+          selectionMatch.userId ||
+          trimmed;
+        return ensure(id, name, selectionMatch.planName || planHint);
+      }
+
+      return ensure(trimmed, trimmed, planHint);
+    };
+
+    roomParticipants.forEach((p) => {
+      resolveFromAny(p.id, "");
     });
-    
-    console.log('displayParticipants final result:', result);
-    
-    return result;
-  }, [presentIds, selections, roomParticipants]);
+
+    selections.forEach((s) => {
+      resolveFromAny(s.userId || s.user, s.planName || "");
+    });
+
+    if (sessionParticipantId) {
+      ensure(
+        sessionParticipantId,
+        normalizedUserName || userName || sessionParticipantId,
+        ""
+      );
+    } else if (localUserId) {
+      ensure(localUserId, normalizedUserName || userName || localUserId, "");
+    }
+
+    const presentSet = new Set<string>();
+    presentIds.forEach((pid) => {
+      const resolved = resolveFromAny(pid);
+      if (resolved) {
+        presentSet.add(resolved);
+      }
+    });
+    if (presentSet.size > 0) {
+      return Array.from(presentSet)
+        .map((id) => map.get(id) || { id, name: id, plan: "" })
+        .filter(
+          (p, index, arr) =>
+            arr.findIndex((candidate) => candidate.id === p.id) === index
+        );
+    }
+
+    return Array.from(map.values());
+  }, [
+    presentIds,
+    selections,
+    roomParticipants,
+    sessionParticipantId,
+    normalizedUserName,
+    userName,
+    localUserId,
+  ]);
+
 
   // ===== 全員投票モード =====
   const [activeVote, setActiveVote] = useState<ActiveVoteState | null>(null);
   const [voteMap, setVoteMap] = useState<Record<string, VoteChoice>>({});
   const [myVoteChoice, setMyVoteChoice] = useState<VoteChoice | null>(null);
 
-  const totalParticipants = participants.length;
+  const totalParticipants = resolvedParticipantIds.length;
   const myUserId = useMemo(() => {
     const trimmedSession = sessionParticipantId?.trim();
     if (trimmedSession) return trimmedSession;
@@ -285,17 +342,17 @@ export default function Play3Page() {
 
   const displayParticipants = useMemo(() => {
     // 重複除去と有効な参加者のみフィルタリング
-    const validParticipants = participants.filter((p) => 
+    const validParticipants = participants.filter((p) =>
       p.id && p.id.trim() && p.name && p.name.trim()
     );
-    
+
     // 自分が含まれているかチェック
     const selfIncluded = myUserId && validParticipants.some((p) => p.id === myUserId);
-    
+
     if (selfIncluded) {
       return validParticipants;
     }
-    
+
     // 自分が含まれていない場合は追加
     if (myUserId && normalizedUserName) {
       return [
@@ -303,13 +360,51 @@ export default function Play3Page() {
         { id: myUserId, name: normalizedUserName, plan: "" },
       ];
     }
-    
+
     return validParticipants;
   }, [participants, myUserId, normalizedUserName]);
 
-  // 分母は常に「実参加者」。expectedUserIds が来ても、実体とズレないよう displayParticipants を真実源に
+  // 実参加者リスト（重複・未定義を除去、自分も含める）
+  const resolvedParticipantIds = useMemo(() => {
+    const appendSelf = (ids: string[]) => {
+      const trimmedSelf = myUserId?.trim();
+      if (trimmedSelf && !ids.includes(trimmedSelf)) {
+        return [...ids, trimmedSelf];
+      }
+      return ids;
+    };
+
+    const byDisplay = displayParticipants
+      .map((p) => p.id?.trim())
+      .filter((id): id is string => !!id);
+
+    if (byDisplay.length > 0) {
+      return Array.from(new Set(appendSelf(byDisplay)));
+    }
+
+    const byPresence = presentIds
+      .map((pid) => pid?.trim())
+      .filter((pid): pid is string => !!pid);
+
+    if (byPresence.length > 0) {
+      return Array.from(new Set(appendSelf(byPresence)));
+    }
+
+    const bySelections = selections
+      .map((s) => s.userId || s.user)
+      .map((id) => id?.trim())
+      .filter((id): id is string => !!id);
+
+    if (bySelections.length > 0) {
+      return Array.from(new Set(appendSelf(bySelections)));
+    }
+
+    return appendSelf([] as string[]);
+  }, [displayParticipants, presentIds, selections, myUserId]);
+
+  // expectedVoteIds は displayParticipants を真実源とする（投票分母）
   const expectedVoteIds = useMemo(() => {
-    const ids = displayParticipants.map((p) => p.id);
+    const ids = displayParticipants.map((p) => p.id?.trim()).filter(Boolean);
     const seen = new Set<string>();
     return ids.filter((id) => {
       if (!id || seen.has(id)) return false;
@@ -317,6 +412,7 @@ export default function Play3Page() {
       return true;
     });
   }, [displayParticipants]);
+
 
   const participantMap = useMemo(
     () => new Map(displayParticipants.map((p) => [p.id, p] as const)),
@@ -334,14 +430,14 @@ export default function Play3Page() {
   }, [activeVote, participantMap]);
 
   const voteAvatarBaseStyle = {
-    width: 26,
-    height: 26,
+    width: 32,
+    height: 32,
     borderRadius: "50%",
-    border: "1px solid #e5e7eb",
+    border: "1px solid #e2e8f0",
     background: "#fff",
-    boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
+    boxShadow: "0 2px 8px rgba(15,23,42,0.12)",
     fontWeight: 800,
-    fontSize: 12,
+    fontSize: 13,
     color: "#111827",
     display: "inline-flex",
     alignItems: "center",
@@ -384,7 +480,7 @@ export default function Play3Page() {
       };
       nodes.push(
         <div key={`${target}-${id}`} title={info?.name || id} style={style}>
-          {info?.name?.[0] || id?.[0] || "?"}
+          {info?.name?.[0]?.toUpperCase() || id?.[0]?.toUpperCase() || "?"}
         </div>
       );
     });
@@ -420,24 +516,18 @@ export default function Play3Page() {
 
   // 全員準備完了で自動遷移
   useEffect(() => {
-    // displayParticipants ベースで準備完了判定
-    const actualParticipantCount = displayParticipants.length;
-    const readyCount = displayParticipants.reduce((acc, participant) => {
-      return acc + (play3Ready[participant.id] ? 1 : 0);
-    }, 0);
-    
-    console.log('Ready status check:', { 
-      actualParticipantCount, 
-      readyCount, 
-      vsIdsLength: vsIds.length,
-      play3Ready,
-      displayParticipants: displayParticipants.map(p => ({ id: p.id, name: p.name, ready: play3Ready[p.id] }))
-    });
-    
-    if (actualParticipantCount > 0 && readyCount === actualParticipantCount && vsIds.length === 0) {
-      router.push(`/room/${roomId}/result`);
-    }
-  }, [play3Ready, displayParticipants, vsIds.length, router, roomId]);
+// ✅ displayParticipants ベースで準備完了判定
+useEffect(() => {
+  const actualParticipantCount = displayParticipants.length;
+  const readyCount = displayParticipants.reduce((acc, participant) => {
+    return acc + (play3Ready[participant.id] ? 1 : 0);
+  }, 0);
+
+  if (actualParticipantCount > 0 && readyCount === actualParticipantCount && vsIds.length === 0) {
+    router.push(`/room/${roomId}/result`);
+  }
+}, [play3Ready, displayParticipants, vsIds.length, router, roomId]);
+
 
   // finalSelections 購読
   useEffect(() => {
@@ -629,45 +719,52 @@ export default function Play3Page() {
   // UI: 参加者アイコン（頭文字）
   const renderAvatars = () => {
     const seen = new Set<string>();
+    const resolvedSet = new Set(resolvedParticipantIds);
+
     const actualParticipants = displayParticipants.filter((p) => {
       const id = (p.id || "").trim();
       const name = (p.name || "").trim();
       if (!id || !name || seen.has(id)) return false;
+      if (resolvedSet.size > 0 && !resolvedSet.has(id)) return false;
+
       seen.add(id);
       return true;
     });
 
-    // 全参加者分のアイコンを表示（投票中は投票状況を反映）
-    const isVotingActive = activeVote?.modalOpen;
+// 全参加者分のアイコンを表示（投票中は投票状況を反映）
+const isVotingActive = activeVote?.modalOpen;
 
-    return (
-      <div style={{ display: "flex", gap: 8 }}>
-        {actualParticipants.map((p) => {
-          // 投票状況をチェック
-          const hasVoted = isVotingActive ? !!(voteMap[p.id] || (p.id === myUserId && myVoteChoice)) : false;
-          const isUnvoted = isVotingActive && !hasVoted;
+return (
+  <div style={{ display: "flex", gap: 8 }}>
+    {actualParticipants.map((p) => {
+      // 投票状況をチェック
+      const hasVoted = isVotingActive ? !!(voteMap[p.id] || (p.id === myUserId && myVoteChoice)) : false;
+      const isUnvoted = isVotingActive && !hasVoted;
 
-          return (
-            <button
-              key={p.id}
-              onClick={() => setActiveUserInfo(p.id)}
-              title={`${p.name} (${p.id}) ${isVotingActive ? (hasVoted ? '投票済み' : '未投票') : ''}`}
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: "50%",
-                border: "1px solid #e5e7eb",
-                background: isUnvoted ? "#4b5563" : "#fff", // 未投票者は黒塗り
-                boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
-                fontWeight: 800,
-                color: isUnvoted ? "#fff" : "#111827", // 未投票者は白文字
-                cursor: "pointer",
-              }}
-            >
-              {p.name?.[0]?.toUpperCase() || "?"}
-            </button>
-          );
-        })}
+      return (
+        <button
+          key={p.id}
+          onClick={() => setActiveUserInfo(p.id)}
+          title={`${p.name} (${p.id}) ${isVotingActive ? (hasVoted ? "投票済み" : "未投票") : ""}`}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            border: "1px solid #e5e7eb",
+            background: isUnvoted ? "#4b5563" : "#fff", // 未投票者は黒塗り
+            boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
+            fontWeight: 800,
+            color: isUnvoted ? "#fff" : "#111827", // 未投票者は白文字
+            cursor: "pointer",
+          }}
+        >
+          {p.name?.[0]?.toUpperCase() || "?"}
+        </button>
+      );
+    })}
+  </div>
+);
+
       </div>
     );
   };
@@ -767,6 +864,7 @@ export default function Play3Page() {
       displayParticipants.map((p) => [p.name, p.id])
     );
     const validIds = new Set(displayParticipants.map((p) => p.id));
+    const resolvedSet = new Set(resolvedParticipantIds);
     const unsub = onSnapshot(
       doc(db, "rooms", roomId, PLAY3_VOTE_COLLECTION, cid),
       (snap) => {
@@ -780,25 +878,33 @@ export default function Play3Page() {
           typeof data.currentRound === "number" ? data.currentRound : 0;
         const raw = data?.votes || {};
         const normalized: Record<string, VoteChoice> = {};
+        const allowUnknown =
+          validIds.size === 0 && resolvedSet.size === 0;
         Object.entries(raw).forEach(([k, v]) => {
           const parsed = parseVoteValue(v);
           if (!parsed) return;
           if (docRound > 0 && parsed.round !== docRound) return;
-          let key = k;
-          if (validIds.has(k)) {
-            key = k;
-          } else if (nameToId.has(k)) {
-            key = nameToId.get(k)!;
+          const trimmed = typeof k === "string" ? k.trim() : "";
+          if (!trimmed) return;
+
+          let key = trimmed;
+          if (validIds.has(trimmed)) {
+            key = trimmed;
+          } else if (nameToId.has(trimmed)) {
+            key = nameToId.get(trimmed)!;
           } else {
             // IDズレ対策: displayParticipantsに含まれないuserIdの投票は除外
-            console.log(`投票を除外: ${k} (参加者リストに存在しない)`);
+            console.log(`投票を除外: ${trimmed} (参加者リストに存在しない)`);
             return;
           }
+
           // 最終的にvalidIdsに含まれるキーのみ投票として認める
           if (validIds.has(key)) {
             normalized[key] = parsed.choice;
           } else {
             console.log(`投票を除外: ${key} (正規化後も参加者リストに存在しない)`);
+          }
+
           }
         });
         const myServerChoice = normalized[myUserId];
@@ -827,6 +933,7 @@ export default function Play3Page() {
     activeVote?.modalOpen,
     activeVote?.round,
     displayParticipants,
+    resolvedParticipantIds,
     myUserId,
     myVoteChoice,
   ]);
@@ -960,9 +1067,12 @@ export default function Play3Page() {
     const effectiveUserId = myUserId?.trim();
     if (!roomId || typeof roomId !== "string" || !effectiveUserId) return;
     if (!isActualParticipant) {
-      alert("この端末のIDが部屋の参加者として認識されていません。右上の参加者名と一致する端末から投票してください。");
+      alert(
+        "この端末のIDが部屋の参加者として認識されていません。\n右上の参加者名と一致する端末から投票してください。"
+      );
       return;
     }
+
     const cid = targetCardId || cardModal?.id;
     if (!cid) return;
     const sessionId = `${cid}-${Date.now()}`;
@@ -988,7 +1098,20 @@ export default function Play3Page() {
       console.warn("Failed to load existing play3Votes doc", error);
     }
     // 分母は常に実参加者（表示中の参加者）
-    const participantIds = displayParticipants.map(p => p.id).filter(Boolean);
+    const participantIds = Array.from(
+      new Set(
+        displayParticipants
+          .map((p) => p.id?.trim())
+          .filter((id): id is string => !!id && id.length > 0)
+      )
+    );
+
+    // 自分が含まれていない場合は追加（安全策）
+    const trimmedSelf = effectiveUserId?.trim();
+    if (trimmedSelf && !participantIds.includes(trimmedSelf)) {
+      participantIds.push(trimmedSelf);
+    }
+
     const myKey = effectiveUserId;
     const voteValue = formatVoteValue(nextRound, choice);
     await setDoc(
