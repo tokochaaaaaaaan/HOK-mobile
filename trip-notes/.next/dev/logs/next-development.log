@@ -1,0 +1,4 @@
+[00:02:59.553] Server  ERROR   Error: ENOENT: no such file or directory, scandir '/Users/Tokochaaaaaaaan/Desktop/HOK/trip-notes/src/app'
+[00:02:59.561] Server  ERROR    ⨯ "unhandledRejection:" Error: ENOENT: no such file or directory, scandir '/Users/Tokochaaaaaaaan/Desktop/HOK/trip-notes/src/app'
+[00:02:59.569] Server  ERROR    ⨯ "unhandledRejection: " Error: ENOENT: no such file or directory, scandir '/Users/Tokochaaaaaaaan/Desktop/HOK/trip-notes/src/app'
+[00:02:59.754] Server  LOG      ✓ Compiled in 1106ms

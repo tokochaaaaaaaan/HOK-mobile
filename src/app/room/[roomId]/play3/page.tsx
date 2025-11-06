@@ -305,7 +305,6 @@ export default function Play3Page() {
   const [voteMap, setVoteMap] = useState<Record<string, VoteChoice>>({});
   const [myVoteChoice, setMyVoteChoice] = useState<VoteChoice | null>(null);
 
-  const totalParticipants = resolvedParticipantIds.length;
   const myUserId = useMemo(() => {
     const trimmedSession = sessionParticipantId?.trim();
     if (trimmedSession) return trimmedSession;
@@ -514,19 +513,17 @@ export default function Play3Page() {
     return () => unsub();
   }, [roomId]);
 
-  // 全員準備完了で自動遷移
+  // ✅ displayParticipants ベースで準備完了判定
   useEffect(() => {
-// ✅ displayParticipants ベースで準備完了判定
-useEffect(() => {
-  const actualParticipantCount = displayParticipants.length;
-  const readyCount = displayParticipants.reduce((acc, participant) => {
-    return acc + (play3Ready[participant.id] ? 1 : 0);
-  }, 0);
+    const actualParticipantCount = displayParticipants.length;
+    const readyCount = displayParticipants.reduce((acc, participant) => {
+      return acc + (play3Ready[participant.id] ? 1 : 0);
+    }, 0);
 
-  if (actualParticipantCount > 0 && readyCount === actualParticipantCount && vsIds.length === 0) {
-    router.push(`/room/${roomId}/result`);
-  }
-}, [play3Ready, displayParticipants, vsIds.length, router, roomId]);
+    if (actualParticipantCount > 0 && readyCount === actualParticipantCount && vsIds.length === 0) {
+      router.push(`/room/${roomId}/result`);
+    }
+  }, [play3Ready, displayParticipants, vsIds.length, router, roomId]);
 
 
   // finalSelections 購読
@@ -764,9 +761,6 @@ return (
     })}
   </div>
 );
-
-      </div>
-    );
   };
 
   const getCard = (id: string) => ALL_CARDS.find((c) => c.id === id);
@@ -903,8 +897,6 @@ return (
             normalized[key] = parsed.choice;
           } else {
             console.log(`投票を除外: ${key} (正規化後も参加者リストに存在しない)`);
-          }
-
           }
         });
         const myServerChoice = normalized[myUserId];
