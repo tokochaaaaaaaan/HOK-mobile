@@ -114,6 +114,8 @@ export default function Play3Page() {
   const [userInfoExpanded, setUserInfoExpanded] = useState<
     Record<string, boolean>
   >({});
+
+  // ルームに保存された参加者（id→name の辞書を rooms/{roomId} に持つ想定）
   const [roomParticipants, setRoomParticipants] = useState<
     { id: string; name: string }[]
   >([]);
@@ -222,6 +224,8 @@ export default function Play3Page() {
     });
     return list;
   }, [presentIds, selections, roomParticipants]);
+
+  // ===== 全員投票モード =====
   const [activeVote, setActiveVote] = useState<ActiveVoteState | null>(null);
   const [voteMap, setVoteMap] = useState<Record<string, VoteChoice>>({});
   const [myVoteChoice, setMyVoteChoice] = useState<VoteChoice | null>(null);
@@ -251,6 +255,7 @@ export default function Play3Page() {
     roomParticipants,
     selections,
   ]);
+
   const displayParticipants = useMemo(() => {
     if (myUserId && participants.some((p) => p.id === myUserId)) {
       return participants;
@@ -263,6 +268,7 @@ export default function Play3Page() {
     }
     return participants;
   }, [participants, myUserId, normalizedUserName]);
+
   const expectedVoteIds = useMemo(() => {
     const knownIds = new Set([
       ...participants.map((p) => p.id),
@@ -281,10 +287,12 @@ export default function Play3Page() {
       return true;
     });
   }, [activeVote?.expectedUserIds, participants, roomParticipants]);
+
   const participantMap = useMemo(
     () => new Map(displayParticipants.map((p) => [p.id, p] as const)),
     [displayParticipants]
   );
+
   const initiatorDisplayName = useMemo(() => {
     if (!activeVote) return "";
     if (activeVote.initiatedById) {
@@ -294,6 +302,7 @@ export default function Play3Page() {
     if (activeVote.initiatedByName) return activeVote.initiatedByName;
     return "";
   }, [activeVote, participantMap]);
+
   const voteAvatarBaseStyle = {
     width: 26,
     height: 26,
@@ -308,6 +317,7 @@ export default function Play3Page() {
     alignItems: "center",
     justifyContent: "center",
   } as const;
+
   const renderVoteAvatars = (target: VoteChoice) => {
     const nodes: React.ReactNode[] = [];
     expectedVoteIds.forEach((id) => {
@@ -597,7 +607,6 @@ export default function Play3Page() {
     closeCard();
   };
 
-  // ===== 全員投票モード =====
   const CHOICE_TO_CODE: Record<VoteChoice, 0 | 1 | 2> = {
     go: 1,
     no: 0,
@@ -726,15 +735,6 @@ export default function Play3Page() {
     const total = expectedIds.length;
     if (total <= 0 || !activeVote.cardId) return;
 
-    console.log('Vote check:', {
-      total,
-      expectedIds,
-      voteMap,
-      myUserId,
-      myVoteChoice,
-      round: activeVote.round,
-    });
-
     const byId: Record<string, VoteChoice> = {};
     for (const id of expectedIds) {
       const v = voteMap[id];
@@ -745,20 +745,16 @@ export default function Play3Page() {
     }
 
     const voted = Object.keys(byId).length;
-    console.log('Vote progress:', { voted, total, byId });
-    
     if (voted >= total) {
       const votes = Object.values(byId);
       const allGo = votes.every((v) => v === "go");
       const allNo = votes.every((v) => v === "no");
-      console.log('Vote completed:', { votes, allGo, allNo });
-      
+
       (async () => {
         const goVotes = votes.filter((v) => v === "go").length;
         const noVotes = votes.filter((v) => v === "no").length;
         const pendingVotes = votes.filter((v) => v === "pending").length;
-        
-        // 全員一致で各エリアに配置
+
         if (allGo) {
           await setDoc(
             doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
@@ -768,7 +764,7 @@ export default function Play3Page() {
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: false
+              hasBlackBorder: false,
             },
             { merge: true }
           );
@@ -781,12 +777,11 @@ export default function Play3Page() {
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: false
+              hasBlackBorder: false,
             },
             { merge: true }
           );
         } else if (votes.every((v) => v === "pending")) {
-          // 全員保留の場合はVSに配置（黒枠付き）
           await setDoc(
             doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
             {
@@ -795,12 +790,11 @@ export default function Play3Page() {
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: true
+              hasBlackBorder: true,
             },
             { merge: true }
           );
         } else {
-          // 意見が分かれた場合はVSに配置（黒枠付き）
           await setDoc(
             doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
             {
@@ -809,12 +803,12 @@ export default function Play3Page() {
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: true
+              hasBlackBorder: true,
             },
             { merge: true }
           );
         }
-        
+
         // 投票状態をクリア
         await setDoc(
           doc(db, "rooms", roomId!, "play3State", "state"),
@@ -831,10 +825,11 @@ export default function Play3Page() {
           },
           { merge: true }
         );
-        
+
         setUiLocked(false);
         setUiLockReason(null);
         setMyVoteChoice(null);
+        setVoteMap({});
         closeCard();
       })();
     }
@@ -1663,7 +1658,7 @@ export default function Play3Page() {
                           <div
                             key={idx}
                             style={{
-                              border: 
+                              border:
                                 u.category === "veryWant" ? "2px solid #fca5a5" :
                                 u.category === "want" ? "2px solid #fbcfe8" :
                                 u.category === "neutral" ? "2px solid #d1d5db" :
@@ -1712,7 +1707,7 @@ export default function Play3Page() {
                                 カテゴリ：
                                 <strong
                                   style={{
-                                    color: 
+                                    color:
                                       u.category === "veryWant" ? "#7f1d1d" :
                                       u.category === "want" ? "#9d174d" :
                                       u.category === "neutral" ? "#374151" :
@@ -1800,23 +1795,22 @@ export default function Play3Page() {
                       );
                     })()}
 
-                    <div style={{ 
-                      display: "flex", 
-                      gap: 12, 
+                    <div style={{
+                      display: "flex",
+                      gap: 12,
                       position: "relative",
                       justifyContent: "center",
                       alignItems: "center",
                       width: "100%",
                       padding: "0 20px"
                     }}>
-
                       {(() => {
                         const myChoice = myVoteChoice || voteMap[myUserId];
                         const hasVoted = !!myChoice;
                         const votedNo = myChoice === "no";
                         const votedGo = myChoice === "go";
                         const votedPending = myChoice === "pending";
-                        
+
                         const goCount = expectedVoteIds.reduce((acc, id) => {
                           const v = voteMap[id];
                           const mine = id === myUserId ? myVoteChoice || v : v;
@@ -1879,20 +1873,12 @@ export default function Play3Page() {
                           cursor: hasVoted && !votedPending ? "not-allowed" : "pointer",
                         };
 
-                        // 投票進捗（押したかどうかの全体統計）
+                        // 投票進捗
                         const votedCount = expectedVoteIds.reduce((acc, id) => {
                           const v = voteMap[id];
                           const mine = id === myUserId ? myVoteChoice || v : v;
                           return acc + (mine ? 1 : 0);
                         }, 0);
-
-                        console.log('Vote UI update:', {
-                          expected: expectedVoteIds.length,
-                          votedCount,
-                          voteMap,
-                          myUserId,
-                          myVoteChoice
-                        });
 
                         return (
                           <>
@@ -1909,10 +1895,10 @@ export default function Play3Page() {
                                 borderRadius: 8,
                               }}
                             >
-                                投票済み {votedCount}/{expectedVoteIds.length}
+                              投票済み {votedCount}/{expectedVoteIds.length}
                             </div>
 
-                            {/* 投票開始メッセージ（理由と同じ位置に配置） */}
+                            {/* 投票開始メッセージ */}
                             {activeVote?.modalOpen && (
                               <div
                                 style={{
