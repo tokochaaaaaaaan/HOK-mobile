@@ -238,6 +238,8 @@ export default function Play3Page() {
       finalResult: result
     });
     
+    console.log('displayParticipants final result:', result);
+    
     return result;
   }, [presentIds, selections, roomParticipants]);
 
@@ -355,6 +357,18 @@ export default function Play3Page() {
       const mine = id === myUserId ? (myVoteChoice ?? server) : server;
       return mine === target;
     });
+    
+    // デバッグログ追加
+    console.log(`renderVoteAvatars(${target}):`, {
+      displayParticipants: displayParticipants.map(p => ({ id: p.id, name: p.name })),
+      voteMap,
+      myUserId,
+      myVoteChoice,
+      ordered,
+      voters,
+      target
+    });
+    
     if (voters.length === 0) return null;
 
     const maxIcons = Math.min(displayParticipants.length, 4);
@@ -928,9 +942,18 @@ export default function Play3Page() {
     userName,
   ]);
 
+  // 実参加者に含まれないIDでは投票を開始できないようにする
+  const isActualParticipant = useMemo(() => {
+    return !!(myUserId && displayParticipants.some(p => p.id === myUserId));
+  }, [myUserId, displayParticipants]);
+
   const startVote = async (choice: VoteChoice, targetCardId?: string) => {
     const effectiveUserId = myUserId?.trim();
     if (!roomId || typeof roomId !== "string" || !effectiveUserId) return;
+    if (!isActualParticipant) {
+      alert("この端末のIDが部屋の参加者として認識されていません。右上の参加者名と一致する端末から投票してください。");
+      return;
+    }
     const cid = targetCardId || cardModal?.id;
     if (!cid) return;
     const sessionId = `${cid}-${Date.now()}`;
@@ -955,11 +978,8 @@ export default function Play3Page() {
     } catch (error) {
       console.warn("Failed to load existing play3Votes doc", error);
     }
-    const participantIdSet = new Set(participants.map((p) => p.id).filter(Boolean));
-    if (effectiveUserId) {
-      participantIdSet.add(effectiveUserId);
-    }
-    const participantIds = Array.from(participantIdSet);
+    // 分母は常に実参加者（表示中の参加者）
+    const participantIds = displayParticipants.map(p => p.id).filter(Boolean);
     const myKey = effectiveUserId;
     const voteValue = formatVoteValue(nextRound, choice);
     await setDoc(
@@ -970,7 +990,7 @@ export default function Play3Page() {
         currentRound: nextRound,
         votes: { [myKey]: voteValue },
         history,
-        expectedUserIds: participantIds,
+        expectedUserIds: participantIds, // ← 実参加者に固定
         updatedAt: serverTimestamp(),
       },
       { merge: true }
@@ -985,7 +1005,7 @@ export default function Play3Page() {
         initiatedById: myUserId,
         initiatedByName: normalizedUserName || userName || myUserId,
         round: nextRound,
-        expectedUserIds: participantIds,
+        expectedUserIds: participantIds, // ← 実参加者に固定
         updatedAt: serverTimestamp(),
       },
       { merge: true }
@@ -1011,6 +1031,10 @@ export default function Play3Page() {
       !myUserId
     )
       return;
+    if (!isActualParticipant) {
+      alert("この端末のIDが部屋の参加者として認識されていません。右上の参加者名と一致する端末から投票してください。");
+      return;
+    }
     // 押した瞬間に自分の投票アイコンを出す（楽観更新）
     try {
       setMyVoteChoice(choice);
@@ -1920,6 +1944,15 @@ export default function Play3Page() {
                           const mine = p.id === myUserId ? (myVoteChoice || v) : v;
                           return acc + (mine ? 1 : 0);
                         }, 0);
+
+                        console.log('Vote progress calculation:', {
+                          displayParticipants: displayParticipants.map(p => ({ id: p.id, name: p.name })),
+                          totalParticipantsCount,
+                          votedCount,
+                          voteMap,
+                          myUserId,
+                          myVoteChoice
+                        });
 
                         return (
                           <>
