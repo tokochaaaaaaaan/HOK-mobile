@@ -24,6 +24,17 @@ import { normalizeCategories } from "../../../../utils/normalizeCategories";
 
 const PLAY3_VOTE_COLLECTION = "play3Votes";
 
+type VoteChoice = "go" | "no" | "pending";
+type ActiveVoteState = {
+  cardId: string;
+  sessionId: string;
+  modalOpen: boolean;
+  initiatedById?: string;
+  initiatedByName?: string;
+  round: number;
+  expectedUserIds?: string[];
+};
+
 export default function Play3Page() {
   const params = useParams();
   const roomId = Array.isArray((params as any).roomId)
@@ -31,6 +42,10 @@ export default function Play3Page() {
     : (params as any).roomId;
   const router = useRouter();
   const { userName } = useUser();
+  const normalizedUserName = useMemo(
+    () => (userName ? userName.trim() : ""),
+    [userName]
+  );
   usePreventBack();
 
   // 画面が狭い場合に全体を少し縮小して表示
@@ -99,49 +114,195 @@ export default function Play3Page() {
   const [userInfoExpanded, setUserInfoExpanded] = useState<
     Record<string, boolean>
   >({});
+
+  // ルームに保存された参加者（id→name の辞書を rooms/{roomId} に持つ想定）
+  const [roomParticipants, setRoomParticipants] = useState<
+    { id: string; name: string }[]
+  >([]);
+  const [sessionParticipantId, setSessionParticipantId] = useState<string | null>(
+    null
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = window.sessionStorage.getItem("hok3:participantId");
+      if (stored) setSessionParticipantId(stored);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!roomId || typeof roomId !== "string") return;
+    const unsub = onSnapshot(doc(db, "rooms", roomId), (snap) => {
+      if (!snap.exists()) {
+        setRoomParticipants([]);
+        return;
+      }
+      const data: any = snap.data();
+      const parts = data?.participants || {};
+      const list = Object.entries(parts).map(([id, name]) => ({
+        id,
+        name: typeof name === "string" && name.trim().length > 0 ? name.trim() : id,
+      }));
+      setRoomParticipants(list);
+      if (typeof window !== "undefined" && normalizedUserName) {
+        const match = list.find((p) => p.name === normalizedUserName);
+        if (match) {
+          try {
+            window.sessionStorage.setItem("hok3:participantId", match.id);
+          } catch {}
+          setSessionParticipantId(match.id);
+        }
+      }
+    });
+    return () => unsub();
+  }, [roomId, normalizedUserName]);
+
   // presence を優先して参加者を決定（未取得時は selections をフォールバック）
   const participants = useMemo(() => {
-    const ids =
+    const base = new Map<string, { id: string; name: string; plan: string }>();
+    const normalizedRoom = roomParticipants.map((p) => ({
+      id: p.id,
+      name: typeof p.name === "string" && p.name.trim().length > 0 ? p.name : p.id,
+    }));
+    const nameToId = new Map(
+      normalizedRoom.map((p) => [p.name, p.id] as [string, string])
+    );
+
+    normalizedRoom.forEach((p) => {
+      base.set(p.id, { id: p.id, name: p.name, plan: "" });
+    });
+
+    selections.forEach((s) => {
+      const trimmedUserName = (s.userName || s.user || "").trim();
+      const candidates = [s.userId, s.user].filter(
+        (v): v is string => typeof v === "string" && v.length > 0
+      );
+      if (trimmedUserName && nameToId.has(trimmedUserName)) {
+        candidates.unshift(nameToId.get(trimmedUserName)!);
+      }
+      const matchId = candidates.find((cid) => base.has(cid)) || candidates[0];
+      if (!matchId) return;
+      const current = base.get(matchId);
+      const name = current?.name || trimmedUserName || matchId;
+      base.set(matchId, {
+        id: matchId,
+        name,
+        plan: s.planName || current?.plan || "",
+      });
+    });
+
+    selections.forEach((s) => {
+      const id = (s.userId || s.user || "").trim();
+      if (!id || base.has(id)) return;
+      base.set(id, {
+        id,
+        name: (s.userName || s.user || id || "").trim() || id,
+        plan: s.planName || "",
+      });
+    });
+
+    const orderSource =
       presentIds && presentIds.length
         ? presentIds
-        : selections.map((s) => s.userId);
-    const byId = new Map(selections.map((s) => [s.userId, s] as const));
-    const list = ids.map((id) => {
-      const s = byId.get(id);
-      return { id, name: s?.userName || id, plan: s?.planName || "" };
-    });
+        : normalizedRoom.map((p) => p.id);
     const seen = new Set<string>();
-    return list.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
-  }, [presentIds, selections]);
+    const list: { id: string; name: string; plan: string }[] = [];
+    orderSource.forEach((id) => {
+      if (!id || seen.has(id)) return;
+      const item = base.get(id);
+      if (item) {
+        list.push(item);
+        seen.add(id);
+      }
+    });
+    base.forEach((value, id) => {
+      if (!seen.has(id)) {
+        list.push(value);
+        seen.add(id);
+      }
+    });
+    return list;
+  }, [presentIds, selections, roomParticipants]);
+
+  // ===== 全員投票モード =====
+  const [activeVote, setActiveVote] = useState<ActiveVoteState | null>(null);
+  const [voteMap, setVoteMap] = useState<Record<string, VoteChoice>>({});
+  const [myVoteChoice, setMyVoteChoice] = useState<VoteChoice | null>(null);
+
   const totalParticipants = participants.length;
   const myUserId = useMemo(() => {
-    const me = participants.find(
-      (p) => p.name === (userName || "") || p.id === (userName || "")
-    );
-    return me?.id || (userName || "unknown");
-  }, [participants, userName]);
+    if (sessionParticipantId) return sessionParticipantId;
+    if (normalizedUserName) {
+      const matchByName = participants.find(
+        (p) => p.name === normalizedUserName
+      );
+      if (matchByName) return matchByName.id;
+      const matchRoom = roomParticipants.find(
+        (p) => p.name === normalizedUserName
+      );
+      if (matchRoom) return matchRoom.id;
+      const selectionMatch = selections.find(
+        (s) => s.userName === normalizedUserName || s.user === normalizedUserName
+      );
+      if (selectionMatch?.userId) return selectionMatch.userId;
+    }
+    return "";
+  }, [
+    sessionParticipantId,
+    normalizedUserName,
+    participants,
+    roomParticipants,
+    selections,
+  ]);
+
   const displayParticipants = useMemo(() => {
-    const exists = participants.some((p) => p.id === myUserId);
-    return exists
-      ? participants
-      : [...participants, { id: myUserId, name: userName || "自分", plan: "" }];
-  }, [participants, myUserId, userName]);
+    if (myUserId && participants.some((p) => p.id === myUserId)) {
+      return participants;
+    }
+    if (myUserId && normalizedUserName) {
+      return [
+        ...participants,
+        { id: myUserId, name: normalizedUserName, plan: "" },
+      ];
+    }
+    return participants;
+  }, [participants, myUserId, normalizedUserName]);
+
   const expectedVoteIds = useMemo(() => {
+    const knownIds = new Set([
+      ...participants.map((p) => p.id),
+      ...roomParticipants.map((p) => p.id),
+    ]);
     const ids =
       activeVote?.expectedUserIds && activeVote.expectedUserIds.length > 0
         ? activeVote.expectedUserIds
         : participants.map((p) => p.id);
     const seen = new Set<string>();
     return ids.filter((id) => {
+      if (!id) return false;
+      if (!knownIds.has(id)) return false;
       if (seen.has(id)) return false;
       seen.add(id);
       return true;
     });
-  }, [activeVote?.expectedUserIds, participants]);
+  }, [activeVote?.expectedUserIds, participants, roomParticipants]);
+
   const participantMap = useMemo(
-    () => new Map(participants.map((p) => [p.id, p] as const)),
-    [participants]
+    () => new Map(displayParticipants.map((p) => [p.id, p] as const)),
+    [displayParticipants]
   );
+
+  const initiatorDisplayName = useMemo(() => {
+    if (!activeVote) return "";
+    if (activeVote.initiatedById) {
+      const found = participantMap.get(activeVote.initiatedById);
+      if (found?.name) return found.name;
+    }
+    if (activeVote.initiatedByName) return activeVote.initiatedByName;
+    return "";
+  }, [activeVote, participantMap]);
+
   const voteAvatarBaseStyle = {
     width: 26,
     height: 26,
@@ -156,6 +317,7 @@ export default function Play3Page() {
     alignItems: "center",
     justifyContent: "center",
   } as const;
+
   const renderVoteAvatars = (target: VoteChoice) => {
     const nodes: React.ReactNode[] = [];
     expectedVoteIds.forEach((id) => {
@@ -394,7 +556,7 @@ export default function Play3Page() {
   // UI: 参加者アイコン（頭文字）
   const renderAvatars = () => (
     <div style={{ display: "flex", gap: 8 }}>
-      {participants.map((p) => (
+      {displayParticipants.map((p) => (
         <button
           key={p.id}
           onClick={() => setActiveUserInfo(p.id)}
@@ -445,22 +607,6 @@ export default function Play3Page() {
     closeCard();
   };
 
-  // ===== 全員投票モード =====
-  type VoteChoice = "go" | "no" | "pending";
-  type ActiveVote =
-    | {
-        cardId: string;
-        sessionId: string;
-        modalOpen: boolean;
-        initiatedBy?: string;
-        round: number;
-        expectedUserIds?: string[];
-      }
-    | null;
-  const [activeVote, setActiveVote] = useState<ActiveVote>(null);
-  const [voteMap, setVoteMap] = useState<Record<string, VoteChoice>>({});
-  const [myVoteChoice, setMyVoteChoice] = useState<VoteChoice | null>(null);
-
   const CHOICE_TO_CODE: Record<VoteChoice, 0 | 1 | 2> = {
     go: 1,
     no: 0,
@@ -480,7 +626,7 @@ export default function Play3Page() {
     const match = value.match(/^y(\d+)-([0-2])$/);
     if (!match) return null;
     const round = Number(match[1]);
-    const code = Number(match[2]);
+    const code = Number(match[2]) as 0 | 1 | 2;
     const choice = CODE_TO_CHOICE[code];
     if (!choice || Number.isNaN(round)) return null;
     return { round, choice };
@@ -492,11 +638,12 @@ export default function Play3Page() {
     const unsub = onSnapshot(doc(db, "rooms", roomId, "play3State", "state"), (snap) => {
       const data: any = snap.data();
       if (data) {
-        const next: ActiveVote = {
+        const next: ActiveVoteState = {
           cardId: data.cardId || "",
           sessionId: data.sessionId || "",
           modalOpen: !!data.modalOpen,
-          initiatedBy: data.initiatedBy,
+          initiatedById: data.initiatedById || data.initiatedBy,
+          initiatedByName: data.initiatedByName || data.initiatedBy,
           round: typeof data.round === "number" ? data.round : 0,
           expectedUserIds: Array.isArray(data.expectedUserIds)
             ? (data.expectedUserIds as string[])
@@ -522,8 +669,10 @@ export default function Play3Page() {
       setMyVoteChoice(null);
       return;
     }
-    const nameToId = new Map<string, string>(participants.map((p) => [p.name, p.id]));
-    const validIds = new Set(participants.map((p) => p.id));
+    const nameToId = new Map<string, string>(
+      displayParticipants.map((p) => [p.name, p.id])
+    );
+    const validIds = new Set(displayParticipants.map((p) => p.id));
     const unsub = onSnapshot(
       doc(db, "rooms", roomId, PLAY3_VOTE_COLLECTION, cid),
       (snap) => {
@@ -574,7 +723,7 @@ export default function Play3Page() {
     activeVote?.sessionId,
     activeVote?.modalOpen,
     activeVote?.round,
-    participants,
+    displayParticipants,
     myUserId,
     myVoteChoice,
   ]);
@@ -582,21 +731,9 @@ export default function Play3Page() {
   // 全員投票完了で自動判定・クローズ（userId キーで集計）
   useEffect(() => {
     if (!activeVote?.modalOpen) return;
-    const expectedIds =
-      activeVote.expectedUserIds && activeVote.expectedUserIds.length > 0
-        ? Array.from(new Set(activeVote.expectedUserIds))
-        : participants.map((p) => p.id);
+    const expectedIds = expectedVoteIds;
     const total = expectedIds.length;
     if (total <= 0 || !activeVote.cardId) return;
-
-    console.log('Vote check:', {
-      total,
-      expectedIds,
-      voteMap,
-      myUserId,
-      myVoteChoice,
-      round: activeVote.round,
-    });
 
     const byId: Record<string, VoteChoice> = {};
     for (const id of expectedIds) {
@@ -608,20 +745,16 @@ export default function Play3Page() {
     }
 
     const voted = Object.keys(byId).length;
-    console.log('Vote progress:', { voted, total, byId });
-    
     if (voted >= total) {
       const votes = Object.values(byId);
       const allGo = votes.every((v) => v === "go");
       const allNo = votes.every((v) => v === "no");
-      console.log('Vote completed:', { votes, allGo, allNo });
-      
+
       (async () => {
         const goVotes = votes.filter((v) => v === "go").length;
         const noVotes = votes.filter((v) => v === "no").length;
         const pendingVotes = votes.filter((v) => v === "pending").length;
-        
-        // 全員一致で各エリアに配置
+
         if (allGo) {
           await setDoc(
             doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
@@ -631,7 +764,7 @@ export default function Play3Page() {
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: false
+              hasBlackBorder: false,
             },
             { merge: true }
           );
@@ -644,12 +777,11 @@ export default function Play3Page() {
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: false
+              hasBlackBorder: false,
             },
             { merge: true }
           );
         } else if (votes.every((v) => v === "pending")) {
-          // 全員保留の場合はVSに配置（黒枠付き）
           await setDoc(
             doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
             {
@@ -658,12 +790,11 @@ export default function Play3Page() {
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: true
+              hasBlackBorder: true,
             },
             { merge: true }
           );
         } else {
-          // 意見が分かれた場合はVSに配置（黒枠付き）
           await setDoc(
             doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
             {
@@ -672,12 +803,12 @@ export default function Play3Page() {
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: true
+              hasBlackBorder: true,
             },
             { merge: true }
           );
         }
-        
+
         // 投票状態をクリア
         await setDoc(
           doc(db, "rooms", roomId!, "play3State", "state"),
@@ -686,23 +817,37 @@ export default function Play3Page() {
             modalOpen: false,
             sessionId: null,
             initiatedBy: null,
+            initiatedById: null,
+            initiatedByName: null,
             round: null,
             expectedUserIds: [],
             updatedAt: serverTimestamp(),
           },
           { merge: true }
         );
-        
+
         setUiLocked(false);
         setUiLockReason(null);
         setMyVoteChoice(null);
+        setVoteMap({});
         closeCard();
       })();
     }
-  }, [activeVote?.modalOpen, voteMap, participants, myVoteChoice, roomId, myUserId, userName, activeVote?.cardId]);
+  }, [
+    activeVote?.modalOpen,
+    activeVote?.cardId,
+    activeVote?.round,
+    activeVote?.sessionId,
+    voteMap,
+    expectedVoteIds,
+    myVoteChoice,
+    roomId,
+    myUserId,
+    userName,
+  ]);
 
   const startVote = async (choice: VoteChoice, targetCardId?: string) => {
-    if (!roomId || typeof roomId !== "string") return;
+    if (!roomId || typeof roomId !== "string" || !myUserId) return;
     const cid = targetCardId || cardModal?.id;
     if (!cid) return;
     const sessionId = `${cid}-${Date.now()}`;
@@ -727,8 +872,10 @@ export default function Play3Page() {
     } catch (error) {
       console.warn("Failed to load existing play3Votes doc", error);
     }
-    const participantIdSet = new Set(participants.map((p) => p.id));
-    if (myUserId) participantIdSet.add(myUserId);
+    const participantIdSet = new Set(participants.map((p) => p.id).filter(Boolean));
+    if (myUserId) {
+      participantIdSet.add(myUserId);
+    }
     const participantIds = Array.from(participantIdSet);
     const myKey = myUserId;
     const voteValue = formatVoteValue(nextRound, choice);
@@ -751,7 +898,9 @@ export default function Play3Page() {
         cardId: cid,
         modalOpen: true,
         sessionId,
-        initiatedBy: userName || "unknown",
+        initiatedBy: normalizedUserName || userName || myUserId,
+        initiatedById: myUserId,
+        initiatedByName: normalizedUserName || userName || myUserId,
         round: nextRound,
         expectedUserIds: participantIds,
         updatedAt: serverTimestamp(),
@@ -775,7 +924,8 @@ export default function Play3Page() {
       !roomId ||
       typeof roomId !== "string" ||
       !activeVote?.cardId ||
-      !activeVote?.sessionId
+      !activeVote?.sessionId ||
+      !myUserId
     )
       return;
     // 押した瞬間に自分の投票アイコンを出す（楽観更新）
@@ -865,7 +1015,7 @@ export default function Play3Page() {
             fontWeight: 700,
           }}
         >
-          全員の要望に沿ってカードを各エリアに当てはめました！VSのカードがなくなったらゲーム終了です！
+          投票しましょう！
         </div>
 
         {/* 上段: 行く / 行かない */}
@@ -1508,7 +1658,7 @@ export default function Play3Page() {
                           <div
                             key={idx}
                             style={{
-                              border: 
+                              border:
                                 u.category === "veryWant" ? "2px solid #fca5a5" :
                                 u.category === "want" ? "2px solid #fbcfe8" :
                                 u.category === "neutral" ? "2px solid #d1d5db" :
@@ -1557,7 +1707,7 @@ export default function Play3Page() {
                                 カテゴリ：
                                 <strong
                                   style={{
-                                    color: 
+                                    color:
                                       u.category === "veryWant" ? "#7f1d1d" :
                                       u.category === "want" ? "#9d174d" :
                                       u.category === "neutral" ? "#374151" :
@@ -1645,23 +1795,22 @@ export default function Play3Page() {
                       );
                     })()}
 
-                    <div style={{ 
-                      display: "flex", 
-                      gap: 12, 
+                    <div style={{
+                      display: "flex",
+                      gap: 12,
                       position: "relative",
                       justifyContent: "center",
                       alignItems: "center",
                       width: "100%",
                       padding: "0 20px"
                     }}>
-
                       {(() => {
                         const myChoice = myVoteChoice || voteMap[myUserId];
                         const hasVoted = !!myChoice;
                         const votedNo = myChoice === "no";
                         const votedGo = myChoice === "go";
                         const votedPending = myChoice === "pending";
-                        
+
                         const goCount = expectedVoteIds.reduce((acc, id) => {
                           const v = voteMap[id];
                           const mine = id === myUserId ? myVoteChoice || v : v;
@@ -1724,20 +1873,12 @@ export default function Play3Page() {
                           cursor: hasVoted && !votedPending ? "not-allowed" : "pointer",
                         };
 
-                        // 投票進捗（押したかどうかの全体統計）
+                        // 投票進捗
                         const votedCount = expectedVoteIds.reduce((acc, id) => {
                           const v = voteMap[id];
                           const mine = id === myUserId ? myVoteChoice || v : v;
                           return acc + (mine ? 1 : 0);
                         }, 0);
-
-                        console.log('Vote UI update:', {
-                          expected: expectedVoteIds.length,
-                          votedCount,
-                          voteMap,
-                          myUserId,
-                          myVoteChoice
-                        });
 
                         return (
                           <>
@@ -1754,10 +1895,10 @@ export default function Play3Page() {
                                 borderRadius: 8,
                               }}
                             >
-                                投票済み {votedCount}/{expectedVoteIds.length}
+                              投票済み {votedCount}/{expectedVoteIds.length}
                             </div>
 
-                            {/* 投票開始メッセージ（理由と同じ位置に配置） */}
+                            {/* 投票開始メッセージ */}
                             {activeVote?.modalOpen && (
                               <div
                                 style={{
@@ -1778,7 +1919,7 @@ export default function Play3Page() {
                                   marginLeft: "auto",
                                 }}
                               >
-                                {activeVote.initiatedBy}さんが投票を開始しました。
+                                {`${initiatorDisplayName || "誰か"}さんが投票を開始しました。`}
                               </div>
                             )}
 
