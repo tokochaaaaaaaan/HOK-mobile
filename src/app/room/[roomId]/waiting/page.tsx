@@ -217,8 +217,14 @@ export default function WaitingPage() {
           getCategoryData(k).map((x: any) => {
             const fullCardInfo = allCards.find(c => c.id === (x.id || x));
             const cardId = x.id || x;
-            const reason = x.reason || "";
-            console.log(`Building ${k} card:`, { cardId, originalData: x, reason });
+            
+            // 理由の取得：優先順位 1) x.reason, 2) rawData.reasons[cardId]
+            let reason = x.reason || "";
+            if (!reason && rawData.reasons && rawData.reasons[cardId]) {
+              reason = rawData.reasons[cardId];
+            }
+            
+            console.log(`Building ${k} card:`, { cardId, originalData: x, reason, fromReasons: rawData.reasons?.[cardId] });
             return {
               id: cardId,
               title: fullCardInfo?.title || x.title || `カード${cardId.replace('card', '')}`,
@@ -230,7 +236,14 @@ export default function WaitingPage() {
           
         console.log('Waiting page data loaded:', {
           categories: cat,
-          rawData: { verywant: rawData.verywant, verydont: rawData.verydont, want: rawData.want, neutral: rawData.neutral, dont: rawData.dont },
+          rawData: { 
+            verywant: rawData.verywant, 
+            verydont: rawData.verydont, 
+            want: rawData.want, 
+            neutral: rawData.neutral, 
+            dont: rawData.dont,
+            reasons: rawData.reasons 
+          },
           builtCategories: {
             veryWant: build("veryWant"),
             veryDont: build("veryDont")
