@@ -66,7 +66,8 @@ export function agreementOverall(allCards: number[][]): number {
   const cardAgreements = allCards.map(scores => agreementForCard(scores));
   const totalAgreement = cardAgreements.reduce((sum, agreement) => sum + agreement, 0);
   
-  return totalAgreement / allCards.length;
+  // 小数点第1位で四捨五入して整数に統一
+  return Math.round(totalAgreement / allCards.length);
 }
 
 /**
