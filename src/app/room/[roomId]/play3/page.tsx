@@ -122,6 +122,7 @@ export default function Play3Page() {
   const [sessionParticipantId, setSessionParticipantId] = useState<string | null>(
     null
   );
+  const [localUserId, setLocalUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -157,6 +158,31 @@ export default function Play3Page() {
     });
     return () => unsub();
   }, [roomId, normalizedUserName]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storageKey = "hok3:localUserId";
+    try {
+      const stored = window.sessionStorage.getItem(storageKey);
+      if (stored && stored.trim().length > 0) {
+        setLocalUserId(stored.trim());
+        return;
+      }
+      const randomId =
+        typeof window.crypto !== "undefined" &&
+        typeof window.crypto.randomUUID === "function"
+          ? window.crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const generated = `local-${randomId}`;
+      window.sessionStorage.setItem(storageKey, generated);
+      setLocalUserId(generated);
+    } catch {
+      const fallback = `local-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 10)}`;
+      setLocalUserId(fallback);
+    }
+  }, []);
 
   // presence を優先して参加者を決定（未取得時は selections をフォールバック）
   const participants = useMemo(() => {
@@ -222,20 +248,27 @@ export default function Play3Page() {
 
   const totalParticipants = participants.length;
   const myUserId = useMemo(() => {
-    if (sessionParticipantId) return sessionParticipantId;
+    const trimmedSession = sessionParticipantId?.trim();
+    if (trimmedSession) return trimmedSession;
     if (normalizedUserName) {
       const matchByName = participants.find(
         (p) => p.name === normalizedUserName
       );
-      if (matchByName) return matchByName.id;
+      if (matchByName?.id) return matchByName.id.trim();
       const matchRoom = roomParticipants.find(
         (p) => p.name === normalizedUserName
       );
-      if (matchRoom) return matchRoom.id;
+      if (matchRoom?.id) return matchRoom.id.trim();
       const selectionMatch = selections.find(
         (s) => s.userName === normalizedUserName || s.user === normalizedUserName
       );
-      if (selectionMatch?.userId) return selectionMatch.userId;
+      if (selectionMatch?.userId) return selectionMatch.userId.trim();
+    }
+    if (userName && userName.trim().length > 0) {
+      return userName.trim();
+    }
+    if (localUserId && localUserId.trim().length > 0) {
+      return localUserId.trim();
     }
     return "";
   }, [
@@ -244,6 +277,8 @@ export default function Play3Page() {
     participants,
     roomParticipants,
     selections,
+    userName,
+    localUserId,
   ]);
 
   const displayParticipants = useMemo(() => {
@@ -275,19 +310,27 @@ export default function Play3Page() {
       ...participants.map((p) => p.id),
       ...roomParticipants.map((p) => p.id),
     ]);
+    if (myUserId) {
+      knownIds.add(myUserId);
+    }
     const ids =
       activeVote?.expectedUserIds && activeVote.expectedUserIds.length > 0
         ? activeVote.expectedUserIds
         : participants.map((p) => p.id);
     const seen = new Set<string>();
-    return ids.filter((id) => {
-      if (!id) return false;
-      if (!knownIds.has(id)) return false;
-      if (seen.has(id)) return false;
+    const filtered: string[] = [];
+    ids.forEach((id) => {
+      if (!id) return;
+      if (!knownIds.has(id)) return;
+      if (seen.has(id)) return;
       seen.add(id);
-      return true;
+      filtered.push(id);
     });
-  }, [activeVote?.expectedUserIds, participants, roomParticipants]);
+    if (filtered.length === 0 && myUserId && knownIds.has(myUserId)) {
+      filtered.push(myUserId);
+    }
+    return filtered;
+  }, [activeVote?.expectedUserIds, participants, roomParticipants, myUserId]);
 
   const participantMap = useMemo(
     () => new Map(displayParticipants.map((p) => [p.id, p] as const)),
@@ -556,23 +599,23 @@ export default function Play3Page() {
 
   // UI: 参加者アイコン（頭文字）
   const renderAvatars = () => {
-    // 最大4人まで表示、実際の参加者数に応じて調整
-    const actualParticipants = displayParticipants.filter((p) => 
-      p.id && p.id.trim() && p.name && p.name.trim()
-    );
-    
-    console.log('Rendering avatars:', { 
-      actualParticipants, 
-      displayParticipants, 
-      participants, 
-      roomParticipants, 
-      myUserId, 
-      normalizedUserName 
+    const seen = new Set<string>();
+    const actualParticipants = displayParticipants.filter((p) => {
+      const id = (p.id || "").trim();
+      const name = (p.name || "").trim();
+      if (!id || !name || seen.has(id)) return false;
+      seen.add(id);
+      return true;
     });
-    
+
+    const limit =
+      actualParticipants.length <= 2
+        ? actualParticipants.length
+        : Math.min(4, actualParticipants.length);
+
     return (
       <div style={{ display: "flex", gap: 8 }}>
-        {actualParticipants.slice(0, 4).map((p) => (
+        {actualParticipants.slice(0, limit).map((p) => (
           <button
             key={p.id}
             onClick={() => setActiveUserInfo(p.id)}
@@ -865,7 +908,8 @@ export default function Play3Page() {
   ]);
 
   const startVote = async (choice: VoteChoice, targetCardId?: string) => {
-    if (!roomId || typeof roomId !== "string" || !myUserId) return;
+    const effectiveUserId = myUserId?.trim();
+    if (!roomId || typeof roomId !== "string" || !effectiveUserId) return;
     const cid = targetCardId || cardModal?.id;
     if (!cid) return;
     const sessionId = `${cid}-${Date.now()}`;
@@ -891,11 +935,11 @@ export default function Play3Page() {
       console.warn("Failed to load existing play3Votes doc", error);
     }
     const participantIdSet = new Set(participants.map((p) => p.id).filter(Boolean));
-    if (myUserId) {
-      participantIdSet.add(myUserId);
+    if (effectiveUserId) {
+      participantIdSet.add(effectiveUserId);
     }
     const participantIds = Array.from(participantIdSet);
-    const myKey = myUserId;
+    const myKey = effectiveUserId;
     const voteValue = formatVoteValue(nextRound, choice);
     await setDoc(
       cardRef,
@@ -932,7 +976,7 @@ export default function Play3Page() {
     try {
       setVoteMap((prev) => ({
         ...prev,
-        [myUserId]: choice,
+        [effectiveUserId]: choice,
       }));
     } catch {}
   };
