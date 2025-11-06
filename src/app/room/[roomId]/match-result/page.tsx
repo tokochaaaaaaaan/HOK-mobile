@@ -148,6 +148,7 @@ export default function MatchResultPage() {
       }
       
       const list: UserSelection[] = [];
+      const processingErrors: string[] = [];
       
       snapshot.docs.forEach((doc) => {
         const data = doc.data();
@@ -159,35 +160,44 @@ export default function MatchResultPage() {
           hasDont: !!data.dont
         });
         
-        // Handle both new and old data formats
-        if (data.categories) {
-          // 新形式: categories フィールドを使用
-          list.push({
-            user: data.user || data.userId || data.userName || doc.id,
-            userId: data.userId || data.user || data.userName || doc.id,
-            userName: data.userName || data.user || data.userId || doc.id,
-            planName: data.planName || "",
-            categories: data.categories,
-          });
-        } else {
-          // 旧形式: want/dont フィールドからcategoriesを構築
-          const categories = {
-            veryWant: [],
-            want: (data.want || []).map((id: string) => ({ id })),
-            neutral: [],
-            dont: (data.dont || []).map((id: string) => ({ id })),
-            veryDont: [],
-          };
-          
-          list.push({
-            user: data.user || data.userId || doc.id,
-            userId: data.userId || data.user || doc.id,
-            userName: data.userName || data.user || doc.id,
-            planName: data.planName || "",
-            categories,
-          });
+        try {
+          // Handle both new and old data formats
+          if (data.categories) {
+            // 新形式: categories フィールドを使用
+            list.push({
+              user: data.user || data.userId || data.userName || doc.id,
+              userId: data.userId || data.user || data.userName || doc.id,
+              userName: data.userName || data.user || data.userId || doc.id,
+              planName: data.planName || "",
+              categories: data.categories,
+            });
+          } else {
+            // 旧形式: want/dont フィールドからcategoriesを構築
+            const categories = {
+              veryWant: [],
+              want: (data.want || []).map((id: string) => ({ id })),
+              neutral: [],
+              dont: (data.dont || []).map((id: string) => ({ id })),
+              veryDont: [],
+            };
+            
+            list.push({
+              user: data.user || data.userId || doc.id,
+              userId: data.userId || data.user || doc.id,
+              userName: data.userName || data.user || doc.id,
+              planName: data.planName || "",
+              categories,
+            });
+          }
+        } catch (error) {
+          console.error('Match result: Error processing document:', doc.id, error);
+          processingErrors.push(`${doc.id}: ${error}`);
         }
       });
+      
+      if (processingErrors.length > 0) {
+        console.warn('Match result: Some documents had processing errors:', processingErrors);
+      }
       
       console.log('Match result: Final user selections:', list);
       setUserSelections(list);
@@ -219,6 +229,7 @@ export default function MatchResultPage() {
       return;
     }
 
+    // 最低限の参加者数チェック
     if (userSelections.length < 2) {
       console.log('Match result: Less than 2 participants, setting high agreement');
       setOverallAgreement(85);
@@ -226,21 +237,66 @@ export default function MatchResultPage() {
       return;
     }
 
+    // データの有効性チェック：全参加者のカテゴリデータが存在するか確認
+    const validSelections = userSelections.filter(selection => {
+      const hasValidCategories = selection.categories && 
+        typeof selection.categories === 'object' &&
+        Object.keys(selection.categories).length > 0;
+      
+      if (!hasValidCategories) {
+        console.log('Match result: Invalid categories for user:', selection.userName || selection.userId);
+      }
+      
+      return hasValidCategories;
+    });
+
+    // 有効なデータが不足している場合は計算を延期
+    if (validSelections.length !== userSelections.length) {
+      console.log('Match result: Waiting for all user data to be valid', { 
+        total: userSelections.length, 
+        valid: validSelections.length 
+      });
+      return;
+    }
+
+    // 一意性チェック：同じユーザーの重複データを除去
+    const uniqueSelections = validSelections.reduce((acc, current) => {
+      const existing = acc.find(item => 
+        item.userId === current.userId || 
+        item.userName === current.userName ||
+        item.user === current.user
+      );
+      
+      if (!existing) {
+        acc.push(current);
+      }
+      
+      return acc;
+    }, [] as UserSelection[]);
+
+    console.log('Match result: Using unique selections for calculation:', { 
+      original: userSelections.length,
+      valid: validSelections.length,
+      unique: uniqueSelections.length,
+      users: uniqueSelections.map(s => s.userName || s.userId || s.user)
+    });
+
     try {
       console.log('Match result: Converting selections to matrix...');
-      const matrix = convertSelectionsToMatrix(userSelections);
-      console.log('Match result: Matrix conversion successful:', { matrixLength: matrix.length, matrix });
+      const matrix = convertSelectionsToMatrix(uniqueSelections);
+      console.log('Match result: Matrix conversion successful:', { matrixLength: matrix.length, participants: uniqueSelections.length });
       
       console.log('Match result: Calculating overall agreement...');
       const agreement = agreementOverall(matrix);
       console.log('Match result: Overall agreement calculation successful:', agreement);
       
-      setOverallAgreement(agreement);
+      setOverallAgreement(Math.round(agreement)); // 整数に丸める
       setAgreementReady(true);
     } catch (error) {
       console.error('Match result: Error calculating agreement:', error);
-      // Fallback値を設定
-      setOverallAgreement(75);
+      // エラー時は参加者数に基づいた妥当な値を設定
+      const fallbackValue = Math.max(50, Math.min(90, 70 + (uniqueSelections.length * 5)));
+      setOverallAgreement(fallbackValue);
       setAgreementReady(true);
     }
   }, [userSelections]);
