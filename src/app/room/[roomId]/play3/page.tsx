@@ -10,6 +10,7 @@ import {
   onSnapshot,
   doc,
   setDoc,
+  getDoc,
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
@@ -87,6 +88,7 @@ export default function Play3Page() {
   const [vsIds, setVsIds] = useState<string[]>([]);
   const [neutralIds, setNeutralIds] = useState<string[]>([]);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [blackBorderIds, setBlackBorderIds] = useState<Set<string>>(new Set());
   const [assignLoaded, setAssignLoaded] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
@@ -234,6 +236,7 @@ export default function Play3Page() {
       const vs: string[] = [];
       const neu: string[] = [];
       const pending: Set<string> = new Set();
+      const blackBorder: Set<string> = new Set();
       snap.docs.forEach((d) => {
         const data: any = d.data();
         if (data?.status === "go") go.push(d.id);
@@ -241,12 +244,14 @@ export default function Play3Page() {
         else if (data?.status === "vs") vs.push(d.id);
         else if (data?.status === "neutral") neu.push(d.id);
         if (data?.pending) pending.add(d.id);
+        if (data?.hasBlackBorder) blackBorder.add(d.id);
       });
       setGoIds(go);
       setNoIds(no);
       setVsIds(vs);
       setNeutralIds(neu);
       setPendingIds(pending);
+      setBlackBorderIds(blackBorder);
       setAssignLoaded(true);
     });
     return () => unsub();
@@ -400,8 +405,8 @@ export default function Play3Page() {
       }
     | null;
   const [activeVote, setActiveVote] = useState<ActiveVote>(null);
-  const [voteMap, setVoteMap] = useState<Record<string, "go" | "no">>({});
-  const [myVoteChoice, setMyVoteChoice] = useState<"go" | "no" | null>(null);
+  const [voteMap, setVoteMap] = useState<Record<string, "go" | "no" | "pending">>({});
+  const [myVoteChoice, setMyVoteChoice] = useState<"go" | "no" | "pending" | null>(null);
 
   // 状態購読（全員へモーダル同期）
   useEffect(() => {
@@ -440,9 +445,9 @@ export default function Play3Page() {
       const data: any = snap.data();
       const raw = data?.sessionId === activeVote.sessionId ? (data?.votes || {}) : {};
       // 正規化: userName キーが来ても userId に寄せる
-      const normalized: Record<string, "go" | "no"> = {};
+      const normalized: Record<string, "go" | "no" | "pending"> = {};
       Object.entries(raw).forEach(([k, v]) => {
-        const vv = v as "go" | "no";
+        const vv = v as "go" | "no" | "pending";
         if (validIds.has(k)) {
           normalized[k] = vv;
         } else if (nameToId.has(k)) {
@@ -471,9 +476,9 @@ export default function Play3Page() {
       myVoteChoice
     });
     
-    const byId: Record<string, "go" | "no"> = {};
+    const byId: Record<string, "go" | "no" | "pending"> = {};
     for (const p of participants) {
-      const v = voteMap[p.id] as "go" | "no" | undefined;
+      const v = voteMap[p.id] as "go" | "no" | "pending" | undefined;
       if (v) byId[p.id] = v;
     }
     // 自分のローカル選択がまだ反映されていない場合の補完
@@ -489,7 +494,12 @@ export default function Play3Page() {
       console.log('Vote completed:', { votes, allGo, allNo });
       
       (async () => {
-        if (allGo)
+        const goVotes = votes.filter((v) => v === "go").length;
+        const noVotes = votes.filter((v) => v === "no").length;
+        const pendingVotes = votes.filter((v) => v === "pending").length;
+        
+        // 全員一致で各エリアに配置
+        if (allGo) {
           await setDoc(
             doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
             {
@@ -497,10 +507,12 @@ export default function Play3Page() {
               pending: false,
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
+              voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
+              hasBlackBorder: false
             },
             { merge: true }
           );
-        else if (allNo)
+        } else if (allNo) {
           await setDoc(
             doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
             {
@@ -508,10 +520,13 @@ export default function Play3Page() {
               pending: false,
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
+              voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
+              hasBlackBorder: false
             },
             { merge: true }
           );
-        else
+        } else if (votes.every((v) => v === "pending")) {
+          // 全員保留の場合はVSに配置（黒枠付き）
           await setDoc(
             doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
             {
@@ -519,14 +534,40 @@ export default function Play3Page() {
               pending: true,
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
+              voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
+              hasBlackBorder: true
             },
             { merge: true }
           );
+        } else {
+          // 意見が分かれた場合はVSに配置（黒枠付き）
+          await setDoc(
+            doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
+            {
+              status: "vs",
+              pending: true,
+              updatedAt: serverTimestamp(),
+              updatedBy: userName || "unknown",
+              voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
+              hasBlackBorder: true
+            },
+            { merge: true }
+          );
+        }
+        
+        // 投票状態をクリア
         await setDoc(
           doc(db, "rooms", roomId!, "play3State", "state"),
-          { modalOpen: false, closedAt: serverTimestamp() },
+          {
+            cardId: null,
+            modalOpen: false,
+            sessionId: null,
+            initiatedBy: null,
+            updatedAt: serverTimestamp(),
+          },
           { merge: true }
         );
+        
         setUiLocked(false);
         setUiLockReason(null);
         setMyVoteChoice(null);
@@ -535,7 +576,7 @@ export default function Play3Page() {
     }
   }, [activeVote?.modalOpen, voteMap, participants, myVoteChoice, roomId, myUserId, userName, activeVote?.cardId]);
 
-  const startVote = async (choice: "go" | "no", targetCardId?: string) => {
+  const startVote = async (choice: "go" | "no" | "pending", targetCardId?: string) => {
     if (!roomId || typeof roomId !== "string") return;
     const cid = targetCardId || cardModal?.id;
     if (!cid) return;
@@ -573,7 +614,7 @@ export default function Play3Page() {
     } catch {}
   };
 
-  const castVote = async (choice: "go" | "no") => {
+  const castVote = async (choice: "go" | "no" | "pending") => {
     if (
       !roomId ||
       typeof roomId !== "string" ||
@@ -865,7 +906,7 @@ export default function Play3Page() {
               {vsSorted.map((id) => {
                 const info = getCard(id);
                 const ag = agreementMap.get(id) || 0;
-                const pending = pendingIds.has(id);
+                const hasBlackBorder = blackBorderIds.has(id);
                 return (
                   <div
                     key={id}
@@ -874,7 +915,7 @@ export default function Play3Page() {
                       cursor: "pointer",
                       width: TILE_W,
                       flex: "0 0 auto",
-                      border: pending ? "6px solid #000" : "2px solid #e5e7eb",
+                      border: hasBlackBorder ? "6px solid #000" : "2px solid #e5e7eb",
                       background: "#fff",
                       borderRadius: 12,
                       overflow: "hidden",
@@ -1445,30 +1486,23 @@ export default function Play3Page() {
                       );
                     })()}
 
-                    <div style={{ display: "flex", gap: 8, position: "relative" }}>
-                      <button
-                        onClick={() => {
-                          if (!activeVote?.modalOpen) classify(cardModal.id, "vs", true);
-                        }}
-                        disabled={uiLocked || !!activeVote?.modalOpen}
-                        style={{
-                          opacity: uiLocked || activeVote?.modalOpen ? 0.6 : 1,
-                          padding: "10px 14px",
-                          borderRadius: 10,
-                          border: "2px solid #fdba74",
-                          background: "#ffedd5",
-                          color: "#9a3412",
-                          fontWeight: 900,
-                        }}
-                      >
-                        保留して閉じる
-                      </button>
+                    <div style={{ 
+                      display: "flex", 
+                      gap: 12, 
+                      position: "relative",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      width: "100%",
+                      padding: "0 20px"
+                    }}>
 
                       {(() => {
                         const myChoice = myVoteChoice || voteMap[myUserId];
                         const hasVoted = !!myChoice;
                         const votedNo = myChoice === "no";
                         const votedGo = myChoice === "go";
+                        const votedPending = myChoice === "pending";
+                        
                         const goCount = participants.reduce((acc, p) => {
                           const v = voteMap[p.id];
                           const mine = p.id === myUserId ? myVoteChoice || v : v;
@@ -1478,6 +1512,11 @@ export default function Play3Page() {
                           const v = voteMap[p.id];
                           const mine = p.id === myUserId ? myVoteChoice || v : v;
                           return acc + (mine === "no" ? 1 : 0);
+                        }, 0);
+                        const pendingCount = participants.reduce((acc, p) => {
+                          const v = voteMap[p.id];
+                          const mine = p.id === myUserId ? myVoteChoice || v : v;
+                          return acc + (mine === "pending" ? 1 : 0);
                         }, 0);
 
                         const noStyle: any = {
@@ -1509,6 +1548,21 @@ export default function Play3Page() {
                           transition: "all .12s ease",
                           opacity: hasVoted && !votedGo ? 0.6 : 1,
                           cursor: hasVoted && !votedGo ? "not-allowed" : "pointer",
+                        };
+                        const pendingStyle: any = {
+                          padding: "10px 14px",
+                          borderRadius: 10,
+                          border: "none",
+                          background: votedPending ? "#a16207" : "#eab308",
+                          color: "#fff",
+                          fontWeight: 900,
+                          boxShadow: votedPending
+                            ? "0 0 0 3px rgba(234,179,8,0.35) inset"
+                            : undefined,
+                          transform: votedPending ? "translateY(1px)" : undefined,
+                          transition: "all .12s ease",
+                          opacity: hasVoted && !votedPending ? 0.6 : 1,
+                          cursor: hasVoted && !votedPending ? "not-allowed" : "pointer",
                         };
 
                         // 投票進捗（押したかどうかの全体統計）
@@ -1549,8 +1603,8 @@ export default function Play3Page() {
                               <div
                                 style={{
                                   position: "absolute",
-                                  top: -50,
-                                  right: -370,
+                                  top: -60,
+                                  right: 0,
                                   fontSize: 12,
                                   fontWeight: 800,
                                   color: "#059669",
@@ -1583,7 +1637,7 @@ export default function Play3Page() {
                                 }
                                 style={noStyle}
                               >
-                                行かない {noCount}/{participants.length}
+                                行かない
                               </button>
                               <div
                                 style={{
@@ -1628,6 +1682,63 @@ export default function Play3Page() {
 
                             <div style={{ position: "relative" }}>
                               <button
+                                aria-pressed={votedPending}
+                                disabled={hasVoted && !votedPending}
+                                onClick={() =>
+                                  !hasVoted
+                                    ? activeVote?.modalOpen &&
+                                      activeVote.cardId === cardModal.id
+                                      ? castVote("pending")
+                                      : startVote("pending", cardModal.id)
+                                    : undefined
+                                }
+                                style={pendingStyle}
+                              >
+                                保留
+                              </button>
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  top: -10,
+                                  right: -8,
+                                  display: "flex",
+                                  zIndex: 5,
+                                  pointerEvents: "none",
+                                }}
+                              >
+                                {participants
+                                  .filter(
+                                    (p) =>
+                                      voteMap[p.id] === "pending" ||
+                                      (p.id === myUserId && myVoteChoice === "pending")
+                                  )
+                                  .map((p) => (
+                                    <span
+                                      key={p.id}
+                                      title={p.name}
+                                      style={{
+                                        width: 18,
+                                        height: 18,
+                                        borderRadius: "50%",
+                                        background: "#fef3c7",
+                                        border: "1px solid #fde047",
+                                        color: "#a16207",
+                                        fontSize: 11,
+                                        fontWeight: 800,
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        marginLeft: -6,
+                                      }}
+                                    >
+                                      {p.name?.[0] || "?"}
+                                    </span>
+                                  ))}
+                              </div>
+                            </div>
+
+                            <div style={{ position: "relative" }}>
+                              <button
                                 aria-pressed={votedGo}
                                 disabled={hasVoted && !votedGo}
                                 onClick={() =>
@@ -1640,7 +1751,7 @@ export default function Play3Page() {
                                 }
                                 style={goStyle}
                               >
-                                行く {goCount}/{totalParticipants}
+                                行く
                               </button>
                               <div
                                 style={{

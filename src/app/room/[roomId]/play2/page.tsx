@@ -597,7 +597,9 @@ export default function Play2Page() {
                         return card ? { ...card, reason: reasons[cardId] || "" } : null;
                       }).filter(Boolean),
                     };
+                    console.log("play2: Before normalization:", JSON.stringify(categoriesData, null, 2));
                     categoriesData = normalizeCategories(categoriesData);
+                    console.log("play2: After normalization:", JSON.stringify(categoriesData, null, 2));
                     
                     // プラン名を含めて再度保存
                     const userSelectionRef = doc(db, "rooms", roomId, "finalSelections", userName);

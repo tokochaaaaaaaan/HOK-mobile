@@ -217,18 +217,24 @@ export default function WaitingPage() {
           getCategoryData(k).map((x: any) => {
             const fullCardInfo = allCards.find(c => c.id === (x.id || x));
             const cardId = x.id || x;
+            const reason = x.reason || "";
+            console.log(`Building ${k} card:`, { cardId, originalData: x, reason });
             return {
               id: cardId,
               title: fullCardInfo?.title || x.title || `カード${cardId.replace('card', '')}`,
               src: fullCardInfo?.src || x.src || `/pngs/USJ_${cardId.replace('card', '')}_surface-1.png`,
               backSrc: fullCardInfo?.backSrc || x.backSrc || `/pngs/back/USJ_${cardId.replace('card', '')}_back-1.png`,
-              reason: x.reason || "",
+              reason: reason,
             };
           }) as CardWithReason[];
           
         console.log('Waiting page data loaded:', {
           categories: cat,
-          rawData: { verywant: rawData.verywant, verydont: rawData.verydont, want: rawData.want, neutral: rawData.neutral, dont: rawData.dont }
+          rawData: { verywant: rawData.verywant, verydont: rawData.verydont, want: rawData.want, neutral: rawData.neutral, dont: rawData.dont },
+          builtCategories: {
+            veryWant: build("veryWant"),
+            veryDont: build("veryDont")
+          }
         });
         setCategories(
           normalizeCategories({
