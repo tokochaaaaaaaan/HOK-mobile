@@ -188,17 +188,48 @@ export default function WaitingPage() {
         setPlanName(pn);
         if ((dat as any).isReady) { setSelfReady(true); setInteractionLocked(true); }
         const cat = (dat?.categories || {}) as Partial<Categories>;
+        
+        // play2の保存形式（verywant/verydont）も考慮
+        const rawData = dat as any;
+        const getCategoryData = (k: CategoryType) => {
+          // 新形式をチェック
+          if (cat[k] && cat[k].length > 0) return cat[k];
+          
+          // play2の保存形式をチェック
+          if (k === 'veryWant' && rawData.verywant) return rawData.verywant;
+          if (k === 'veryDont' && rawData.verydont) return rawData.verydont;
+          
+          // 旧形式をチェック
+          if (k === 'want' && rawData.want) {
+            return rawData.want.map((cardId: string) => allCards.find(c => c.id === cardId)).filter(Boolean);
+          }
+          if (k === 'neutral' && rawData.neutral) {
+            return rawData.neutral.map((cardId: string) => allCards.find(c => c.id === cardId)).filter(Boolean);
+          }
+          if (k === 'dont' && rawData.dont) {
+            return rawData.dont.map((cardId: string) => allCards.find(c => c.id === cardId)).filter(Boolean);
+          }
+          
+          return [];
+        };
+        
         const build = (k: CategoryType) =>
-          (cat[k] || []).map((x: any) => {
-            const fullCardInfo = allCards.find(c => c.id === x.id);
+          getCategoryData(k).map((x: any) => {
+            const fullCardInfo = allCards.find(c => c.id === (x.id || x));
+            const cardId = x.id || x;
             return {
-              id: x.id,
-              title: fullCardInfo?.title || x.title || `カード${x.id.replace('card', '')}`,
-              src: fullCardInfo?.src || x.src || `/pngs/USJ_${x.id.replace('card', '')}_surface-1.png`,
-              backSrc: fullCardInfo?.backSrc || x.backSrc || `/pngs/back/USJ_${x.id.replace('card', '')}_back-1.png`,
+              id: cardId,
+              title: fullCardInfo?.title || x.title || `カード${cardId.replace('card', '')}`,
+              src: fullCardInfo?.src || x.src || `/pngs/USJ_${cardId.replace('card', '')}_surface-1.png`,
+              backSrc: fullCardInfo?.backSrc || x.backSrc || `/pngs/back/USJ_${cardId.replace('card', '')}_back-1.png`,
               reason: x.reason || "",
             };
           }) as CardWithReason[];
+          
+        console.log('Waiting page data loaded:', {
+          categories: cat,
+          rawData: { verywant: rawData.verywant, verydont: rawData.verydont, want: rawData.want, neutral: rawData.neutral, dont: rawData.dont }
+        });
         setCategories(
           normalizeCategories({
             veryWant: build("veryWant"),
@@ -593,7 +624,19 @@ export default function WaitingPage() {
           )}
         </div>
         {displayReason && (
-          <div style={{ marginTop: 6, fontSize: ".8rem", color: "#2563eb" }}>{badgeText}</div>
+          <div style={{ 
+            marginTop: 4, 
+            fontSize: ".75rem", 
+            color: "#2563eb", 
+            fontWeight: 500,
+            lineHeight: 1.3,
+            background: "rgba(37, 99, 235, 0.08)",
+            padding: "2px 6px",
+            borderRadius: 4,
+            border: "1px solid rgba(37, 99, 235, 0.2)"
+          }}>
+            {badgeText}
+          </div>
         )}
       </div>
     );
