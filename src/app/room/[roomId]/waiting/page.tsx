@@ -284,6 +284,35 @@ export default function WaitingPage() {
     return () => un();
   }, [roomId]);
 
+  // 全員準備完了時の自動遷移
+  useEffect(() => {
+    const readyCount = Object.values(matchReadyData).filter(Boolean).length;
+    // participantsが空の場合は、matchReadyDataから参加者を推測
+    const participantIds = Object.keys(participants).length > 0 
+      ? Object.keys(participants) 
+      : Object.keys(matchReadyData);
+    const totalCount = participantIds.length;
+    
+    console.log('Ready check:', { 
+      readyCount, 
+      totalCount, 
+      participants, 
+      matchReadyData,
+      participantIds 
+    });
+    
+    // 最低2人以上で全員準備完了の場合にリダイレクト
+    if (totalCount >= 2 && readyCount === totalCount && readyCount > 0) {
+      console.log('All participants ready, redirecting to match-result...');
+      // 少し遅延を入れてからリダイレクト（UIフィードバックのため）
+      const timer = setTimeout(() => {
+        router.push(`/room/${roomId}/match-result`);
+      }, 2000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [matchReadyData, participants, router, roomId]);
+
   // --- Firestore 保存ヘルパ ---
   const saveCategories = useCallback(
     async (next: Categories) => {
@@ -735,7 +764,10 @@ export default function WaitingPage() {
 
   // 進捗
   const matchReadyCount = Object.values(matchReadyData).filter(Boolean).length;
-  const totalParticipants = Object.keys(participants).length || 0;
+  const participantIds = Object.keys(participants).length > 0 
+    ? Object.keys(participants) 
+    : Object.keys(matchReadyData);
+  const totalParticipants = participantIds.length;
   const veryWantCount = categories.veryWant.length;
   const veryDontCount = categories.veryDont.length;
   const reasonCount = [...categories.veryWant, ...categories.veryDont].filter(c => (c.reason || "").trim().length > 0).length;
