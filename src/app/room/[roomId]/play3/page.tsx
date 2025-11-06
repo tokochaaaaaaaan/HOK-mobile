@@ -122,6 +122,7 @@ export default function Play3Page() {
   const [sessionParticipantId, setSessionParticipantId] = useState<string | null>(
     null
   );
+  const [localUserId, setLocalUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -158,84 +159,175 @@ export default function Play3Page() {
     return () => unsub();
   }, [roomId, normalizedUserName]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storageKey = "hok3:localUserId";
+    try {
+      const stored = window.sessionStorage.getItem(storageKey);
+      if (stored && stored.trim().length > 0) {
+        setLocalUserId(stored.trim());
+        return;
+      }
+      const randomId =
+        typeof window.crypto !== "undefined" &&
+        typeof window.crypto.randomUUID === "function"
+          ? window.crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const generated = `local-${randomId}`;
+      window.sessionStorage.setItem(storageKey, generated);
+      setLocalUserId(generated);
+    } catch {
+      const fallback = `local-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 10)}`;
+      setLocalUserId(fallback);
+    }
+  }, []);
+
   // presence を優先して参加者を決定（未取得時は selections をフォールバック）
   const participants = useMemo(() => {
-    // シンプルなバージョンに変更してテスト
-    const uniqueParticipants = new Map<string, { id: string; name: string; plan: string }>();
-    
-    // 1. roomParticipantsから追加
-    roomParticipants.forEach((p) => {
-      if (p.id && p.name) {
-        uniqueParticipants.set(p.id, { 
-          id: p.id, 
-          name: p.name, 
-          plan: "" 
-        });
+    const map = new Map<string, { id: string; name: string; plan: string }>();
+
+    const ensure = (
+      rawId?: string | null,
+      nameHint?: string | null,
+      planHint?: string | null
+    ) => {
+      const trimmedId = rawId?.trim();
+      if (!trimmedId) return null;
+      const resolvedName = nameHint?.trim();
+      const resolvedPlan = planHint || "";
+      const existing = map.get(trimmedId);
+      if (existing) {
+        let nextName = existing.name;
+        let nextPlan = existing.plan;
+        if (
+          resolvedName &&
+          (existing.name === existing.id || existing.name.trim().length === 0)
+        ) {
+          nextName = resolvedName;
+        }
+        if (!nextPlan && resolvedPlan) {
+          nextPlan = resolvedPlan;
+        }
+        if (nextName !== existing.name || nextPlan !== existing.plan) {
+          map.set(trimmedId, { id: trimmedId, name: nextName, plan: nextPlan });
+        }
+        return trimmedId;
       }
-    });
-    
-    // 2. selectionsから追加（重複チェック）
-    selections.forEach((s) => {
-      if (s.userId && s.userName && !uniqueParticipants.has(s.userId)) {
-        uniqueParticipants.set(s.userId, {
-          id: s.userId,
-          name: s.userName,
-          plan: s.planName || ""
-        });
-      }
-    });
-    
-    // 3. presentIdsがあればそれでフィルタ
-    if (presentIds && presentIds.length > 0) {
-      const presentParticipants = Array.from(uniqueParticipants.values())
-        .filter(p => presentIds.includes(p.id));
-      
-      console.log('Participants calculation:', {
-        roomParticipants,
-        selections,
-        presentIds,
-        uniqueParticipants: Array.from(uniqueParticipants.values()),
-        presentParticipants,
-        finalResult: presentParticipants
+      map.set(trimmedId, {
+        id: trimmedId,
+        name: resolvedName || trimmedId,
+        plan: resolvedPlan
       });
-      
-      return presentParticipants;
-    }
-    
-    const result = Array.from(uniqueParticipants.values());
-    
-    console.log('Participants calculation (no presentIds):', {
-      roomParticipants,
-      selections,
-      presentIds,
-      uniqueParticipants: result,
-      finalResult: result
+      return trimmedId;
+    };
+
+    const resolveFromAny = (raw?: string | null, planHint?: string | null) => {
+      const trimmed = raw?.trim();
+      if (!trimmed) return null;
+      if (map.has(trimmed)) return trimmed;
+
+      const roomMatch = roomParticipants.find(
+        (p) => p.id === trimmed || p.name === trimmed
+      );
+      if (roomMatch) {
+        return ensure(roomMatch.id, roomMatch.name, planHint);
+      }
+
+      const selectionMatch = selections.find(
+        (s) =>
+          s.userId === trimmed ||
+          s.user === trimmed ||
+          s.userName === trimmed
+      );
+      if (selectionMatch) {
+        const id = selectionMatch.userId || selectionMatch.user || trimmed;
+        const name =
+          selectionMatch.userName ||
+          selectionMatch.user ||
+          selectionMatch.userId ||
+          trimmed;
+        return ensure(id, name, selectionMatch.planName || planHint);
+      }
+
+      return ensure(trimmed, trimmed, planHint);
+    };
+
+    roomParticipants.forEach((p) => {
+      resolveFromAny(p.id, "");
     });
-    
-    return result;
-  }, [presentIds, selections, roomParticipants]);
+
+    selections.forEach((s) => {
+      resolveFromAny(s.userId || s.user, s.planName || "");
+    });
+
+    if (sessionParticipantId) {
+      ensure(
+        sessionParticipantId,
+        normalizedUserName || userName || sessionParticipantId,
+        ""
+      );
+    } else if (localUserId) {
+      ensure(localUserId, normalizedUserName || userName || localUserId, "");
+    }
+
+    const presentSet = new Set<string>();
+    presentIds.forEach((pid) => {
+      const resolved = resolveFromAny(pid);
+      if (resolved) {
+        presentSet.add(resolved);
+      }
+    });
+
+    if (presentSet.size > 0) {
+      return Array.from(presentSet)
+        .map((id) => map.get(id) || { id, name: id, plan: "" })
+        .filter(
+          (p, index, arr) =>
+            arr.findIndex((candidate) => candidate.id === p.id) === index
+        );
+    }
+
+    return Array.from(map.values());
+  }, [
+    presentIds,
+    selections,
+    roomParticipants,
+    sessionParticipantId,
+    normalizedUserName,
+    userName,
+    localUserId
+  ]);
 
   // ===== 全員投票モード =====
   const [activeVote, setActiveVote] = useState<ActiveVoteState | null>(null);
   const [voteMap, setVoteMap] = useState<Record<string, VoteChoice>>({});
   const [myVoteChoice, setMyVoteChoice] = useState<VoteChoice | null>(null);
 
-  const totalParticipants = participants.length;
+  const totalParticipants = resolvedParticipantIds.length;
   const myUserId = useMemo(() => {
-    if (sessionParticipantId) return sessionParticipantId;
+    const trimmedSession = sessionParticipantId?.trim();
+    if (trimmedSession) return trimmedSession;
     if (normalizedUserName) {
       const matchByName = participants.find(
         (p) => p.name === normalizedUserName
       );
-      if (matchByName) return matchByName.id;
+      if (matchByName?.id) return matchByName.id.trim();
       const matchRoom = roomParticipants.find(
         (p) => p.name === normalizedUserName
       );
-      if (matchRoom) return matchRoom.id;
+      if (matchRoom?.id) return matchRoom.id.trim();
       const selectionMatch = selections.find(
         (s) => s.userName === normalizedUserName || s.user === normalizedUserName
       );
-      if (selectionMatch?.userId) return selectionMatch.userId;
+      if (selectionMatch?.userId) return selectionMatch.userId.trim();
+    }
+    if (userName && userName.trim().length > 0) {
+      return userName.trim();
+    }
+    if (localUserId && localUserId.trim().length > 0) {
+      return localUserId.trim();
     }
     return "";
   }, [
@@ -244,21 +336,23 @@ export default function Play3Page() {
     participants,
     roomParticipants,
     selections,
+    userName,
+    localUserId,
   ]);
 
   const displayParticipants = useMemo(() => {
     // 重複除去と有効な参加者のみフィルタリング
-    const validParticipants = participants.filter((p) => 
+    const validParticipants = participants.filter((p) =>
       p.id && p.id.trim() && p.name && p.name.trim()
     );
-    
+
     // 自分が含まれているかチェック
     const selfIncluded = myUserId && validParticipants.some((p) => p.id === myUserId);
-    
+
     if (selfIncluded) {
       return validParticipants;
     }
-    
+
     // 自分が含まれていない場合は追加
     if (myUserId && normalizedUserName) {
       return [
@@ -266,28 +360,82 @@ export default function Play3Page() {
         { id: myUserId, name: normalizedUserName, plan: "" },
       ];
     }
-    
+
     return validParticipants;
   }, [participants, myUserId, normalizedUserName]);
 
+  const resolvedParticipantIds = useMemo(() => {
+    const appendSelf = (ids: string[]) => {
+      const trimmedSelf = myUserId?.trim();
+      if (trimmedSelf && !ids.includes(trimmedSelf)) {
+        return [...ids, trimmedSelf];
+      }
+      return ids;
+    };
+
+    const byDisplay = displayParticipants
+      .map((p) => p.id?.trim())
+      .filter((id): id is string => !!id);
+    if (byDisplay.length > 0) {
+      return Array.from(new Set(appendSelf(byDisplay)));
+    }
+
+    const byPresence = presentIds
+      .map((pid) => pid?.trim())
+      .filter((pid): pid is string => !!pid);
+    if (byPresence.length > 0) {
+      return Array.from(new Set(appendSelf(byPresence)));
+    }
+
+    const bySelections = selections
+      .map((s) => s.userId || s.user)
+      .map((id) => id?.trim())
+      .filter((id): id is string => !!id);
+    if (bySelections.length > 0) {
+      return Array.from(new Set(appendSelf(bySelections)));
+    }
+
+    return appendSelf([] as string[]);
+  }, [displayParticipants, presentIds, selections, myUserId]);
+
   const expectedVoteIds = useMemo(() => {
-    const knownIds = new Set([
-      ...participants.map((p) => p.id),
-      ...roomParticipants.map((p) => p.id),
-    ]);
-    const ids =
-      activeVote?.expectedUserIds && activeVote.expectedUserIds.length > 0
-        ? activeVote.expectedUserIds
-        : participants.map((p) => p.id);
-    const seen = new Set<string>();
-    return ids.filter((id) => {
-      if (!id) return false;
-      if (!knownIds.has(id)) return false;
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
-  }, [activeVote?.expectedUserIds, participants, roomParticipants]);
+    const ensureSelfIncluded = (ids: string[]) => {
+      const trimmedSelf = myUserId?.trim();
+      if (trimmedSelf && !ids.includes(trimmedSelf)) {
+        return [...ids, trimmedSelf];
+      }
+      return ids;
+    };
+
+    const candidateSet = new Set(resolvedParticipantIds);
+    const fromState = (activeVote?.expectedUserIds || [])
+      .map((id) => id?.trim())
+      .filter((id): id is string => !!id);
+    const uniqueState = Array.from(new Set(fromState));
+
+    if (candidateSet.size > 0) {
+      if (uniqueState.length > 0) {
+        const filtered = uniqueState.filter((id) => candidateSet.has(id));
+        if (filtered.length > 0) {
+          return ensureSelfIncluded(filtered);
+        }
+      }
+      return ensureSelfIncluded(Array.from(candidateSet));
+    }
+
+    if (uniqueState.length > 0) {
+      return ensureSelfIncluded(uniqueState);
+    }
+
+    const presenceFallback = presentIds
+      .map((pid) => pid?.trim())
+      .filter((pid): pid is string => !!pid);
+    if (presenceFallback.length > 0) {
+      return ensureSelfIncluded(Array.from(new Set(presenceFallback)));
+    }
+
+    return ensureSelfIncluded([] as string[]);
+  }, [resolvedParticipantIds, activeVote?.expectedUserIds, presentIds, myUserId]);
 
   const participantMap = useMemo(
     () => new Map(displayParticipants.map((p) => [p.id, p] as const)),
@@ -305,14 +453,14 @@ export default function Play3Page() {
   }, [activeVote, participantMap]);
 
   const voteAvatarBaseStyle = {
-    width: 26,
-    height: 26,
+    width: 32,
+    height: 32,
     borderRadius: "50%",
-    border: "1px solid #e5e7eb",
+    border: "1px solid #e2e8f0",
     background: "#fff",
-    boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
+    boxShadow: "0 2px 8px rgba(15,23,42,0.12)",
     fontWeight: 800,
-    fontSize: 12,
+    fontSize: 13,
     color: "#111827",
     display: "inline-flex",
     alignItems: "center",
@@ -331,7 +479,7 @@ export default function Play3Page() {
       };
       nodes.push(
         <div key={`${target}-${id}`} title={info?.name || id} style={style}>
-          {info?.name?.[0] || id?.[0] || "?"}
+          {info?.name?.[0]?.toUpperCase() || id?.[0]?.toUpperCase() || "?"}
         </div>
       );
     });
@@ -361,11 +509,18 @@ export default function Play3Page() {
       presentIds && presentIds.length
         ? presentIds.reduce((acc, id) => acc + (play3Ready[id] ? 1 : 0), 0)
         : Object.values(play3Ready).filter(Boolean).length;
-    const participantCount = participants.length;
+    const participantCount = resolvedParticipantIds.length;
     if (participantCount > 0 && readyCount === participantCount && vsIds.length === 0) {
       router.push(`/room/${roomId}/result`);
     }
-  }, [play3Ready, participants.length, vsIds.length, router, roomId, presentIds, participants]);
+  }, [
+    play3Ready,
+    resolvedParticipantIds,
+    vsIds,
+    router,
+    roomId,
+    presentIds,
+  ]);
 
   // finalSelections 購読
   useEffect(() => {
@@ -556,23 +711,26 @@ export default function Play3Page() {
 
   // UI: 参加者アイコン（頭文字）
   const renderAvatars = () => {
-    // 最大4人まで表示、実際の参加者数に応じて調整
-    const actualParticipants = displayParticipants.filter((p) => 
-      p.id && p.id.trim() && p.name && p.name.trim()
-    );
-    
-    console.log('Rendering avatars:', { 
-      actualParticipants, 
-      displayParticipants, 
-      participants, 
-      roomParticipants, 
-      myUserId, 
-      normalizedUserName 
+    const seen = new Set<string>();
+    const resolvedSet = new Set(resolvedParticipantIds);
+    const actualParticipants = displayParticipants.filter((p) => {
+      const id = (p.id || "").trim();
+      const name = (p.name || "").trim();
+      if (!id || !name || seen.has(id)) return false;
+      if (resolvedSet.size > 0 && !resolvedSet.has(id)) return false;
+      seen.add(id);
+      return true;
     });
-    
+
+    if (actualParticipants.length <= 2) {
+      return null;
+    }
+
+    const limit = Math.min(4, actualParticipants.length);
+
     return (
       <div style={{ display: "flex", gap: 8 }}>
-        {actualParticipants.slice(0, 4).map((p) => (
+        {actualParticipants.slice(0, limit).map((p) => (
           <button
             key={p.id}
             onClick={() => setActiveUserInfo(p.id)}
@@ -691,6 +849,7 @@ export default function Play3Page() {
       displayParticipants.map((p) => [p.name, p.id])
     );
     const validIds = new Set(displayParticipants.map((p) => p.id));
+    const resolvedSet = new Set(resolvedParticipantIds);
     const unsub = onSnapshot(
       doc(db, "rooms", roomId, PLAY3_VOTE_COLLECTION, cid),
       (snap) => {
@@ -704,15 +863,25 @@ export default function Play3Page() {
           typeof data.currentRound === "number" ? data.currentRound : 0;
         const raw = data?.votes || {};
         const normalized: Record<string, VoteChoice> = {};
+        const allowUnknown =
+          validIds.size === 0 && resolvedSet.size === 0;
         Object.entries(raw).forEach(([k, v]) => {
           const parsed = parseVoteValue(v);
           if (!parsed) return;
           if (docRound > 0 && parsed.round !== docRound) return;
-          let key = k;
-          if (validIds.has(k)) {
-            key = k;
-          } else if (nameToId.has(k)) {
-            key = nameToId.get(k)!;
+          const trimmed = typeof k === "string" ? k.trim() : "";
+          if (!trimmed) return;
+          let key = trimmed;
+          if (validIds.has(trimmed)) {
+            key = trimmed;
+          } else if (nameToId.has(trimmed)) {
+            key = nameToId.get(trimmed)!;
+          } else if (resolvedSet.has(trimmed)) {
+            key = trimmed;
+          } else if (allowUnknown) {
+            key = trimmed;
+          } else {
+            return;
           }
           normalized[key] = parsed.choice;
         });
@@ -742,6 +911,7 @@ export default function Play3Page() {
     activeVote?.modalOpen,
     activeVote?.round,
     displayParticipants,
+    resolvedParticipantIds,
     myUserId,
     myVoteChoice,
   ]);
@@ -865,7 +1035,8 @@ export default function Play3Page() {
   ]);
 
   const startVote = async (choice: VoteChoice, targetCardId?: string) => {
-    if (!roomId || typeof roomId !== "string" || !myUserId) return;
+    const effectiveUserId = myUserId?.trim();
+    if (!roomId || typeof roomId !== "string" || !effectiveUserId) return;
     const cid = targetCardId || cardModal?.id;
     if (!cid) return;
     const sessionId = `${cid}-${Date.now()}`;
@@ -890,12 +1061,17 @@ export default function Play3Page() {
     } catch (error) {
       console.warn("Failed to load existing play3Votes doc", error);
     }
-    const participantIdSet = new Set(participants.map((p) => p.id).filter(Boolean));
-    if (myUserId) {
-      participantIdSet.add(myUserId);
+    const participantIdSet = new Set(
+      (resolvedParticipantIds.length
+        ? resolvedParticipantIds
+        : participants.map((p) => p.id)
+      ).filter((id): id is string => !!id && id.trim().length > 0)
+    );
+    if (effectiveUserId) {
+      participantIdSet.add(effectiveUserId);
     }
     const participantIds = Array.from(participantIdSet);
-    const myKey = myUserId;
+    const myKey = effectiveUserId;
     const voteValue = formatVoteValue(nextRound, choice);
     await setDoc(
       cardRef,
@@ -932,7 +1108,7 @@ export default function Play3Page() {
     try {
       setVoteMap((prev) => ({
         ...prev,
-        [myUserId]: choice,
+        [effectiveUserId]: choice,
       }));
     } catch {}
   };
