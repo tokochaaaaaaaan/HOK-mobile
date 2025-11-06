@@ -1,7 +1,13 @@
 // /src/context/UserContext.tsx
 "use client";
 
-import { createContext, useContext, useState, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
 
 type UserContextType = {
   userName: string;
@@ -26,6 +32,27 @@ const UserContext = createContext<UserContextType>({
 export function UserProvider({ children }: { children: ReactNode }) {
   const [userName, setUserName] = useState("");
   const [cardPositions, setCardPositions] = useState(defaultPositions);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = window.sessionStorage.getItem("hok3:userName");
+      if (stored) {
+        setUserName(stored);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (userName) {
+        window.sessionStorage.setItem("hok3:userName", userName);
+      } else {
+        window.sessionStorage.removeItem("hok3:userName");
+      }
+    } catch {}
+  }, [userName]);
 
   return (
     <UserContext.Provider
