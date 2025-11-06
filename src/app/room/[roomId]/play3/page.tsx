@@ -305,32 +305,16 @@ export default function Play3Page() {
     return validParticipants;
   }, [participants, myUserId, normalizedUserName]);
 
+  // 分母は常に「実参加者」。expectedUserIds が来ても、実体とズレないよう displayParticipants を真実源に
   const expectedVoteIds = useMemo(() => {
-    const knownIds = new Set([
-      ...participants.map((p) => p.id),
-      ...roomParticipants.map((p) => p.id),
-    ]);
-    if (myUserId) {
-      knownIds.add(myUserId);
-    }
-    const ids =
-      activeVote?.expectedUserIds && activeVote.expectedUserIds.length > 0
-        ? activeVote.expectedUserIds
-        : participants.map((p) => p.id);
+    const ids = displayParticipants.map((p) => p.id);
     const seen = new Set<string>();
-    const filtered: string[] = [];
-    ids.forEach((id) => {
-      if (!id) return;
-      if (!knownIds.has(id)) return;
-      if (seen.has(id)) return;
+    return ids.filter((id) => {
+      if (!id || seen.has(id)) return false;
       seen.add(id);
-      filtered.push(id);
+      return true;
     });
-    if (filtered.length === 0 && myUserId && knownIds.has(myUserId)) {
-      filtered.push(myUserId);
-    }
-    return filtered;
-  }, [activeVote?.expectedUserIds, participants, roomParticipants, myUserId]);
+  }, [displayParticipants]);
 
   const participantMap = useMemo(
     () => new Map(displayParticipants.map((p) => [p.id, p] as const)),
@@ -362,23 +346,27 @@ export default function Play3Page() {
     justifyContent: "center",
   } as const;
 
+  // ボタン付属の投票アイコン：参加者人数ぶんで完結（最大4個）。超過は「+n」バッジで集約
   const renderVoteAvatars = (target: VoteChoice) => {
-    const nodes: React.ReactNode[] = [];
-    
-    // 全参加者をチェック（expectedVoteIds + displayParticipants）
-    const allPotentialVoters = new Set([
-      ...expectedVoteIds,
-      ...displayParticipants.map(p => p.id)
-    ]);
+    // 表示順は実参加者順に固定（ゴーストID回避 & UIの一貫性）
+    const ordered = displayParticipants.map((p) => p.id);
+    const voters = ordered.filter((id) => {
+      const server = voteMap[id];
+      const mine = id === myUserId ? (myVoteChoice ?? server) : server;
+      return mine === target;
+    });
+    if (voters.length === 0) return null;
 
-    Array.from(allPotentialVoters).forEach((id) => {
-      const current = voteMap[id] || (id === myUserId ? myVoteChoice : null);
-      if (current !== target) return;
-      
+    const maxIcons = Math.min(displayParticipants.length, 4);
+    const show = voters.slice(0, maxIcons);
+    const rest = voters.length - show.length;
+
+    const nodes: React.ReactNode[] = [];
+    show.forEach((id, idx) => {
       const info = participantMap.get(id);
       const style: React.CSSProperties = {
         ...voteAvatarBaseStyle,
-        marginLeft: nodes.length ? -12 : 0,
+        marginLeft: idx ? -12 : 0,
       };
       nodes.push(
         <div key={`${target}-${id}`} title={info?.name || id} style={style}>
@@ -386,6 +374,17 @@ export default function Play3Page() {
         </div>
       );
     });
+    if (rest > 0) {
+      nodes.push(
+        <div
+          key={`${target}-more`}
+          title={`+${rest}`}
+          style={{ ...voteAvatarBaseStyle, marginLeft: -12, fontSize: 11 }}
+        >
+          +{rest}
+        </div>
+      );
+    }
     return nodes;
   };
 
@@ -1914,11 +1913,11 @@ export default function Play3Page() {
                           cursor: hasVoted && !votedPending ? "not-allowed" : "pointer",
                         };
 
-                        // 投票進捗 - 参加者ベースで計算
+                        // 「投票済み x/y」も実参加者ベース（w/4 固定を解消）
                         const totalParticipantsCount = displayParticipants.length;
-                        const votedCount = displayParticipants.reduce((acc, participant) => {
-                          const v = voteMap[participant.id];
-                          const mine = participant.id === myUserId ? myVoteChoice || v : v;
+                        const votedCount = displayParticipants.reduce((acc, p) => {
+                          const v = voteMap[p.id];
+                          const mine = p.id === myUserId ? (myVoteChoice || v) : v;
                           return acc + (mine ? 1 : 0);
                         }, 0);
 
