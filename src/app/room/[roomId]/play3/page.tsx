@@ -789,8 +789,17 @@ export default function Play3Page() {
             key = k;
           } else if (nameToId.has(k)) {
             key = nameToId.get(k)!;
+          } else {
+            // IDズレ対策: displayParticipantsに含まれないuserIdの投票は除外
+            console.log(`投票を除外: ${k} (参加者リストに存在しない)`);
+            return;
           }
-          normalized[key] = parsed.choice;
+          // 最終的にvalidIdsに含まれるキーのみ投票として認める
+          if (validIds.has(key)) {
+            normalized[key] = parsed.choice;
+          } else {
+            console.log(`投票を除外: ${key} (正規化後も参加者リストに存在しない)`);
+          }
         });
         const myServerChoice = normalized[myUserId];
         setVoteMap(() => {
