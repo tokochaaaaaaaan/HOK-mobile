@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useUser } from "@/context/UserContext";
 import { usePreventBack } from "@/hooks/usePreventBack";
@@ -10,12 +10,10 @@ import {
   onSnapshot,
   doc,
   setDoc,
-  getDoc,
   serverTimestamp,
-  runTransaction,
-  deleteField,
 } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
+import { listenToPresence } from "../../../../../lib/firebase-utils-safe";
 import {
   agreementForCard,
   agreementOverall,
@@ -23,1154 +21,1686 @@ import {
 } from "../../../../utils/agreement-calculator";
 import { normalizeCategories } from "../../../../utils/normalizeCategories";
 
-type CategoryKey = "veryWant" | "want" | "neutral" | "dont" | "veryDont";
-
-type UserSelection = {
-  user: string;
-  userId: string;
-  userName: string;
-  planName?: string;
-  categories: Record<
-    CategoryKey,
-    Array<{
-      id: string;
-      reason?: string;
-    }>
-  >;
-};
-
-type CardVoteState = {
-  go: string[];
-  notGo: string[];
-};
-
-type Play3MetaState = {
-  holds: string[];
-  activeCardId: string | null;
-};
-
-const defaultMetaState: Play3MetaState = {
-  holds: [],
-  activeCardId: null,
-};
-
-type Play3SharedState = Play3MetaState;
-
-const defaultSharedState: Play3SharedState = {
-  ...defaultMetaState,
-};
-
-const ensureMetaState = (data: Partial<Play3MetaState> | undefined): Play3MetaState => ({
-  holds: Array.isArray(data?.holds)
-    ? (data?.holds.filter((id): id is string => typeof id === "string") ?? [])
-    : [],
-  activeCardId: typeof data?.activeCardId === "string" ? data?.activeCardId : null,
-});
-
-const ensureVoteState = (data: Partial<CardVoteState> | undefined): CardVoteState => ({
-  go: Array.isArray(data?.go)
-    ? (data?.go.filter((name): name is string => typeof name === "string") ?? [])
-    : [],
-  notGo: Array.isArray(data?.notGo)
-    ? (data?.notGo.filter((name): name is string => typeof name === "string") ?? [])
-    : [],
-});
-
-const allCards = Array.from({ length: 40 }, (_, i) => {
-  const idx = i + 1;
-  return {
-    id: `card${idx}`,
-    title: `カード${idx}`,
-    src: `/pngs/USJ_${idx}_surface-1.png`,
-    backSrc: `/pngs/back/USJ_${idx}_back-1.png`,
-  };
-});
-
-const categoryLabel: Record<CategoryKey, string> = {
-  veryWant: "特に行きたい",
-  want: "行きたい",
-  neutral: "どちらでもいい",
-  dont: "行きたくない",
-  veryDont: "特に行きたくない",
-};
-
-const categoryChipColor: Record<CategoryKey, { bg: string; text: string; border: string }> = {
-  veryWant: { bg: "#fee2e2", text: "#7f1d1d", border: "#fecaca" },
-  want: { bg: "#fecdd3", text: "#831843", border: "#fbcfe8" },
-  neutral: { bg: "#e5e7eb", text: "#1f2937", border: "#cbd5f5" },
-  dont: { bg: "#bfdbfe", text: "#0c4a6e", border: "#93c5fd" },
-  veryDont: { bg: "#93c5fd", text: "#1e3a8a", border: "#60a5fa" },
-};
-
-const positiveCategories: CategoryKey[] = ["veryWant", "want"];
-const negativeCategories: CategoryKey[] = ["dont", "veryDont"];
-
-const areaPalette = {
-  go: {
-    background: "linear-gradient(135deg, #991b1b 0%, #dc2626 100%)",
-    border: "#f87171",
-    titleColor: "#fff",
-  },
-  notGo: {
-    background: "linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 100%)",
-    border: "#60a5fa",
-    titleColor: "#f8fafc",
-  },
-  vs: {
-    background: "linear-gradient(135deg, #f97316 0%, #fb923c 100%)",
-    border: "#fb923c",
-    titleColor: "#7c2d12",
-  },
-  neutral: {
-    background: "linear-gradient(135deg, #9ca3af 0%, #d1d5db 100%)",
-    border: "#d1d5db",
-    titleColor: "#1f2937",
-  },
-};
-
-const getCardInfo = (cardId: string) => allCards.find((card) => card.id === cardId);
-
-const getInitial = (name: string) => {
-  if (!name) return "?";
-  const trimmed = name.trim();
-  if (!trimmed) return "?";
-  return trimmed.charAt(0).toUpperCase();
-};
-
-const formatCardNames = (ids: string[]) => {
-  if (!ids.length) return "なし";
-  return ids.map((id) => getCardInfo(id)?.title || id).join("、");
-};
-
 export default function Play3Page() {
-  const { roomId } = useParams();
+  const params = useParams();
+  const roomId = Array.isArray((params as any).roomId)
+    ? (params as any).roomId[0]
+    : (params as any).roomId;
   const router = useRouter();
   const { userName } = useUser();
-
   usePreventBack();
 
-  const [userSelections, setUserSelections] = useState<UserSelection[]>([]);
+  // 画面が狭い場合に全体を少し縮小して表示
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const update = () => {
+      const h = window.innerHeight || 0;
+      setScale(h < 900 ? 0.85 : 1);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  // カード定義（40枚）
+  const ALL_CARDS = useMemo(
+    () =>
+      Array.from({ length: 40 }, (_, i) => {
+        const idx = i + 1;
+        return {
+          id: `card${idx}`,
+          title: `カード${idx}`,
+          src: `/pngs/USJ_${idx}_surface-1.png`,
+          backSrc: `/pngs/back/USJ_${idx}_back-1.png`,
+        };
+      }),
+    []
+  );
+
+  type CatItem = { id: string; reason?: string };
+  type Selections = {
+    user: string;
+    userId: string;
+    userName: string;
+    planName?: string;
+    categories: {
+      veryWant: CatItem[];
+      want: CatItem[];
+      neutral: CatItem[];
+      dont: CatItem[];
+      veryDont: CatItem[];
+    };
+  }[];
+
+  const [selections, setSelections] = useState<Selections>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [overallAgreement, setOverallAgreement] = useState(0);
-  const [cardAgreements, setCardAgreements] = useState<
-    { cardId: string; agreement: number; title: string }[]
-  >([]);
-  const [goDecidedIds, setGoDecidedIds] = useState<string[]>([]);
-  const [notGoDecidedIds, setNotGoDecidedIds] = useState<string[]>([]);
-  const [sharedState, setSharedState] = useState<Play3SharedState>(defaultSharedState);
-  const [currentVotes, setCurrentVotes] = useState<CardVoteState>({ go: [], notGo: [] });
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
-  const [showIntro, setShowIntro] = useState(true);
-  const [showNeutralArea, setShowNeutralArea] = useState(false);
-  const [expandedDetail, setExpandedDetail] = useState(false);
-  const [openParticipant, setOpenParticipant] = useState<string | null>(null);
-  const [showBackSide, setShowBackSide] = useState(false);
+  const [agreementMap, setAgreementMap] = useState<Map<string, number>>(
+    new Map()
+  );
+  // 入室中ユーザー（RTDB presence）
+  const [presentIds, setPresentIds] = useState<string[]>([]);
 
-  const participantCount = userSelections.length;
+  // 共有配置（Firestore: rooms/{roomId}/play3Assignments/{cardId} => { status: 'go'|'no'|'vs'|'neutral', pending?: boolean }）
+  const [goIds, setGoIds] = useState<string[]>([]);
+  const [noIds, setNoIds] = useState<string[]>([]);
+  const [vsIds, setVsIds] = useState<string[]>([]);
+  const [neutralIds, setNeutralIds] = useState<string[]>([]);
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [assignLoaded, setAssignLoaded] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
+  // 参加者（右上アバター用）
+  const [activeUserInfo, setActiveUserInfo] = useState<string | null>(null);
+  const [userInfoExpanded, setUserInfoExpanded] = useState<
+    Record<string, boolean>
+  >({});
+  // presence を優先して参加者を決定（未取得時は selections をフォールバック）
+  const participants = useMemo(() => {
+    const ids =
+      presentIds && presentIds.length
+        ? presentIds
+        : selections.map((s) => s.userId);
+    const byId = new Map(selections.map((s) => [s.userId, s] as const));
+    const list = ids.map((id) => {
+      const s = byId.get(id);
+      return { id, name: s?.userName || id, plan: s?.planName || "" };
+    });
+    const seen = new Set<string>();
+    return list.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+  }, [presentIds, selections]);
+  const totalParticipants = participants.length;
+  const myUserId = useMemo(() => {
+    const me = participants.find(
+      (p) => p.name === (userName || "") || p.id === (userName || "")
+    );
+    return me?.id || (userName || "unknown");
+  }, [participants, userName]);
+  const displayParticipants = useMemo(() => {
+    const exists = participants.some((p) => p.id === myUserId);
+    return exists
+      ? participants
+      : [...participants, { id: myUserId, name: userName || "自分", plan: "" }];
+  }, [participants, myUserId, userName]);
+
+  // 移行（結果へ）準備状況
+  const [play3Ready, setPlay3Ready] = useState<Record<string, boolean>>({});
   useEffect(() => {
     if (!roomId || typeof roomId !== "string") return;
-
-    const qSel = query(collection(db, "rooms", roomId, "finalSelections"));
-    const unsub = onSnapshot(qSel, (snap) => {
-      const selections: UserSelection[] = [];
+    const qReady = query(collection(db, "rooms", roomId, "play3Ready"));
+    const unsub = onSnapshot(qReady, (snap) => {
+      const map: Record<string, boolean> = {};
       snap.docs.forEach((d) => {
         const data: any = d.data();
-        if (data?.categories) {
-          const normalized = normalizeCategories(data.categories);
-          selections.push({
-            user: data.user || data.userId || data.userName || d.id,
-            userId: data.userId || data.user || data.userName || d.id,
-            userName: data.userName || data.user || data.userId || d.id,
-            planName: data.planName || data.planname || "",
-            categories: {
-              veryWant: (normalized.verywant || []).map((c: any) => ({ id: c.id, reason: c.reason || "" })),
-              want: (normalized.want || []).map((c: any) => ({ id: c.id, reason: c.reason || "" })),
-              neutral: (normalized.neutral || []).map((c: any) => ({ id: c.id, reason: c.reason || "" })),
-              dont: (normalized.dont || []).map((c: any) => ({ id: c.id, reason: c.reason || "" })),
-              veryDont: (normalized.verydont || []).map((c: any) => ({ id: c.id, reason: c.reason || "" })),
-            },
-          });
-        } else {
-          const normalized = normalizeCategories({
-            verywant: (data.verywant || []).map((id: string) => ({ id, reason: "" })),
-            want: (data.want || []).map((id: string) => ({ id, reason: "" })),
-            neutral: (data.neutral || []).map((id: string) => ({ id, reason: "" })),
-            dont: (data.dont || []).map((id: string) => ({ id, reason: "" })),
-            verydont: (data.verydont || []).map((id: string) => ({ id, reason: "" })),
-          });
-          selections.push({
-            user: data.user || data.userId || d.id,
-            userId: data.userId || data.user || d.id,
-            userName: data.userName || data.user || d.id,
-            planName: data.planName || data.planname || "",
-            categories: {
-              veryWant: (normalized.verywant || []).map((c: any) => ({ id: c.id, reason: c.reason || "" })),
-              want: (normalized.want || []).map((c: any) => ({ id: c.id, reason: c.reason || "" })),
-              neutral: (normalized.neutral || []).map((c: any) => ({ id: c.id, reason: c.reason || "" })),
-              dont: (normalized.dont || []).map((c: any) => ({ id: c.id, reason: c.reason || "" })),
-              veryDont: (normalized.verydont || []).map((c: any) => ({ id: c.id, reason: c.reason || "" })),
-            },
-          });
-        }
+        if (data?.ready) map[data.userId || d.id] = true;
       });
-      setUserSelections(selections);
-      setIsLoading(false);
+      setPlay3Ready(map);
     });
-
     return () => unsub();
   }, [roomId]);
 
+  // 全員準備完了で自動遷移
+  useEffect(() => {
+    // 入室中ユーザーのみで準備完了判定
+    const readyCount =
+      presentIds && presentIds.length
+        ? presentIds.reduce((acc, id) => acc + (play3Ready[id] ? 1 : 0), 0)
+        : Object.values(play3Ready).filter(Boolean).length;
+    if (totalParticipants > 0 && readyCount === totalParticipants && vsIds.length === 0) {
+      router.push(`/room/${roomId}/result`);
+    }
+  }, [play3Ready, totalParticipants, vsIds.length, router, roomId, presentIds]);
+
+  // finalSelections 購読
   useEffect(() => {
     if (!roomId || typeof roomId !== "string") return;
-    const q = query(collection(db, "rooms", roomId, "goNo"));
-    const unsub = onSnapshot(q, (snap) => {
+    const qSel = query(collection(db, "rooms", roomId, "finalSelections"));
+    const unsub = onSnapshot(qSel, (snap) => {
+      const list: Selections = [] as any;
+      snap.docs.forEach((d) => {
+        const data: any = d.data();
+        const norm = normalizeCategories(data.categories || {});
+        list.push({
+          user: data.user || data.userId || data.userName || d.id,
+          userId: data.userId || data.user || data.userName || d.id,
+          userName: data.userName || data.user || data.userId || d.id,
+          planName: data.planName || data.planname || "",
+          categories: {
+            veryWant: (norm.verywant || []).map((c: any) => ({
+              id: c.id,
+              reason: c.reason,
+            })),
+            want: (norm.want || []).map((c: any) => ({ id: c.id })),
+            neutral: (norm.neutral || []).map((c: any) => ({ id: c.id })),
+            dont: (norm.dont || []).map((c: any) => ({ id: c.id })),
+            veryDont: (norm.verydont || []).map((c: any) => ({
+              id: c.id,
+              reason: c.reason,
+            })),
+          },
+        });
+      });
+      setSelections(list);
+      setIsLoading(false);
+    });
+    return () => unsub();
+  }, [roomId]);
+
+  // 合致率計算（全体・カード別）
+  useEffect(() => {
+    if (!selections.length) return;
+    const matrix = convertSelectionsToMatrix(selections as any, 40);
+    setOverallAgreement(agreementOverall(matrix));
+    const map = new Map<string, number>();
+    matrix.forEach((ratings, idx) => {
+      map.set(`card${idx + 1}`, agreementForCard(ratings));
+    });
+    setAgreementMap(map);
+  }, [selections]);
+
+  // presence 購読（入室中ユーザーだけを分母に）
+  useEffect(() => {
+    if (!roomId || typeof roomId !== "string") return;
+    let unsub: (() => void) | undefined;
+    (async () => {
+      unsub = await listenToPresence(roomId as string, (presence) => {
+        try {
+          const onlineIds = Object.entries(presence || {})
+            .filter(([, v]: any) => v && v.online)
+            .map(([id]) => id);
+          setPresentIds(onlineIds);
+        } catch {
+          setPresentIds([]);
+        }
+      });
+    })();
+    return () => {
+      if (typeof unsub === "function") unsub();
+    };
+  }, [roomId]);
+
+  // play3Assignments 購読
+  useEffect(() => {
+    if (!roomId || typeof roomId !== "string") return;
+    const qAssign = query(collection(db, "rooms", roomId, "play3Assignments"));
+    const unsub = onSnapshot(qAssign, (snap) => {
+      if (snap.empty) {
+        setAssignLoaded(true);
+        return;
+      }
       const go: string[] = [];
       const no: string[] = [];
+      const vs: string[] = [];
+      const neu: string[] = [];
+      const pending: Set<string> = new Set();
       snap.docs.forEach((d) => {
         const data: any = d.data();
         if (data?.status === "go") go.push(d.id);
-        if (data?.status === "no") no.push(d.id);
+        else if (data?.status === "no") no.push(d.id);
+        else if (data?.status === "vs") vs.push(d.id);
+        else if (data?.status === "neutral") neu.push(d.id);
+        if (data?.pending) pending.add(d.id);
       });
-      setGoDecidedIds(go);
-      setNotGoDecidedIds(no);
+      setGoIds(go);
+      setNoIds(no);
+      setVsIds(vs);
+      setNeutralIds(neu);
+      setPendingIds(pending);
+      setAssignLoaded(true);
     });
     return () => unsub();
   }, [roomId]);
 
+  // 初期自動配置（一度だけ・play3Assignments が空のとき）
   useEffect(() => {
-    if (!stateRef) return;
-    const unsub = onSnapshot(stateRef, (snap) => {
-      if (!snap.exists()) {
-        setSharedState((prev) => ({ ...prev, ...defaultMetaState }));
-        return;
-      }
-      const raw = snap.data() as Record<string, unknown>;
-      const meta = ensureMetaState(raw as Partial<Play3MetaState> | undefined);
-      setSharedState((prev) => ({ ...prev, holds: meta.holds, activeCardId: meta.activeCardId }));
-    });
-    return () => unsub();
-  }, [stateRef]);
-
-  useEffect(() => {
-    if (!votesCollectionRef || !selectedCardId) {
-      setCurrentVotes({ go: [], notGo: [] });
+    if (!roomId || typeof roomId !== "string") return;
+    if (!assignLoaded || initialized) return;
+    if (!selections.length) return;
+    // snapshot で空（assignLoaded true かつ go/no/vs/neutral 全て空）なら初期化
+    const empty =
+      goIds.length + noIds.length + vsIds.length + neutralIds.length === 0;
+    if (!empty) {
+      setInitialized(true);
       return;
     }
-    const voteDocRef = doc(votesCollectionRef, selectedCardId);
-    const unsub = onSnapshot(voteDocRef, (snap) => {
-      if (!snap.exists()) {
-        setCurrentVotes({ go: [], notGo: [] });
-        return;
+
+    const byCard = (id: string) =>
+      selections.map((s) => ({
+        pos:
+          s.categories.veryWant.some((c) => c.id === id) ||
+          s.categories.want.some((c) => c.id === id),
+        posStrong: s.categories.veryWant.some((c) => c.id === id),
+        posReason:
+          (s.categories.veryWant.find((c) => c.id === id)?.reason || "").trim()
+            .length > 0,
+        neg:
+          s.categories.dont.some((c) => c.id === id) ||
+          s.categories.veryDont.some((c) => c.id === id),
+        negStrong: s.categories.veryDont.some((c) => c.id === id),
+        negReason:
+          (s.categories.veryDont.find((c) => c.id === id)?.reason || "").trim()
+            .length > 0,
+        neu: s.categories.neutral.some((c) => c.id === id),
+      }));
+
+    const initWrites = async () => {
+      for (const card of ALL_CARDS) {
+        const arr = byCard(card.id);
+        const pos = arr.some((a) => a.pos);
+        const neg = arr.some((a) => a.neg);
+        const allNeutral = arr.length > 0 && arr.every((a) => a.neu);
+        const hasNeutral = arr.some((a) => a.neu);
+        const hasReason = arr.some((a) => a.posReason || a.negReason);
+        let status: "go" | "no" | "vs" | "neutral" = "neutral";
+        if (pos && !neg && !allNeutral) status = "go";
+        else if (neg && !pos && !allNeutral) status = "no";
+        else if (pos && neg) status = "vs";
+        else if (allNeutral) status = "neutral";
+        else if ((pos && hasNeutral) || (neg && hasNeutral))
+          status = hasReason ? "vs" : "vs";
+        else status = "neutral";
+        await setDoc(
+          doc(db, "rooms", roomId, "play3Assignments", card.id),
+          {
+            status,
+            pending: status === "vs",
+            updatedAt: serverTimestamp(),
+            updatedBy: userName || "system",
+          },
+          { merge: true }
+        );
       }
-      setCurrentVotes(
-        ensureVoteState(snap.data() as Partial<CardVoteState> | undefined)
+      setInitialized(true);
+    };
+    initWrites();
+  }, [
+    assignLoaded,
+    initialized,
+    selections,
+    roomId,
+    userName,
+    goIds.length,
+    noIds.length,
+    vsIds.length,
+    neutralIds.length,
+  ]);
+
+  // 並び順: 合致率 降順
+  const sortByAgreement = useCallback(
+    (ids: string[]) => {
+      return [...ids].sort(
+        (a, b) => (agreementMap.get(b) || 0) - (agreementMap.get(a) || 0)
       );
-    });
-    return () => unsub();
-  }, [votesCollectionRef, selectedCardId]);
-
-  useEffect(() => {
-    if (sharedState.activeCardId) {
-      setSelectedCardId(sharedState.activeCardId);
-    }
-  }, [sharedState.activeCardId]);
-
-
-  useEffect(() => {
-    if (selectedCardId) {
-      setShowBackSide(false);
-      setExpandedDetail(participantCount <= 4);
-    }
-  }, [selectedCardId, participantCount]);
-  useEffect(() => {
-    if (userSelections.length === 0) return;
-    const ratingMatrix = convertSelectionsToMatrix(userSelections, 40);
-    const overall = agreementOverall(ratingMatrix);
-    setOverallAgreement(overall);
-    const cardResults = ratingMatrix.map((ratings, index) => ({
-      cardId: `card${index + 1}`,
-      title: `カード${index + 1}`,
-      agreement: agreementForCard(ratings),
-    }));
-    setCardAgreements(cardResults);
-  }, [userSelections]);
-
-  const agreementMap = useMemo(() => {
-    const map = new Map<string, number>();
-    cardAgreements.forEach((c) => map.set(c.cardId, c.agreement));
-    return map;
-  }, [cardAgreements]);
-
-  const participantOrder = useMemo(
-    () =>
-      userSelections.map((sel) => ({
-        userName: sel.userName || sel.userId,
-        planName: sel.planName || "未入力",
-        categories: sel.categories,
-      })),
-    [userSelections]
+    },
+    [agreementMap]
   );
 
-  const relevantCardIds = useMemo(() => {
-    const ids = new Set<string>();
-    userSelections.forEach((sel) => {
-      (Object.values(sel.categories) as Array<{ id: string }>).forEach((cards) => {
-        cards.forEach((card) => ids.add(card.id));
-      });
-    });
-    goDecidedIds.forEach((id) => ids.add(id));
-    notGoDecidedIds.forEach((id) => ids.add(id));
-    return Array.from(ids);
-  }, [userSelections, goDecidedIds, notGoDecidedIds]);
+  // UI: 参加者アイコン（頭文字）
+  const renderAvatars = () => (
+    <div style={{ display: "flex", gap: 8 }}>
+      {participants.map((p) => (
+        <button
+          key={p.id}
+          onClick={() => setActiveUserInfo(p.id)}
+          title={p.name}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            border: "1px solid #e5e7eb",
+            background: "#fff",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
+            fontWeight: 800,
+            color: "#111827",
+          }}
+        >
+          {p.name?.[0] || "?"}
+        </button>
+      ))}
+    </div>
+  );
 
-  const cardDetails = useMemo(() => {
-    const detailMap = new Map<
-      string,
-      {
-        userName: string;
-        planName: string;
-        category: CategoryKey;
-        reason: string;
-      }[]
-    >();
-    relevantCardIds.forEach((cardId) => {
-      const perCard: {
-        userName: string;
-        planName: string;
-        category: CategoryKey;
-        reason: string;
-      }[] = [];
-      userSelections.forEach((sel) => {
-        const user = sel.userName || sel.userId;
-        const plan = sel.planName || "未入力";
-        let found: { category: CategoryKey; reason: string } | null = null;
-        (Object.entries(sel.categories) as [CategoryKey, { id: string; reason?: string }[]][]).some(
-          ([category, cards]) => {
-            const hit = cards.find((card) => card.id === cardId);
-            if (hit) {
-              found = { category, reason: hit.reason || "" };
-              return true;
-            }
-            return false;
-          }
-        );
-        perCard.push({
-          userName: user,
-          planName: plan,
-          category: found ? found.category : "neutral",
-          reason: found ? found.reason : "",
-        });
-      });
-      detailMap.set(cardId, perCard);
-    });
-    return detailMap;
-  }, [relevantCardIds, userSelections]);
+  const getCard = (id: string) => ALL_CARDS.find((c) => c.id === id);
 
-  const sortByAgreement = (ids: string[]) => {
-    return [...ids].sort((a, b) => {
-      const agA = agreementMap.get(a) ?? -1;
-      const agB = agreementMap.get(b) ?? -1;
-      return agB - agA;
-    });
-  };
+  // カードモーダル
+  const [cardModal, setCardModal] = useState<{ id: string; flipped: boolean } | null>(null);
+  const openCard = (id: string) => setCardModal({ id, flipped: false });
+  const closeCard = () => setCardModal(null);
+  const [uiLocked, setUiLocked] = useState(false);
+  const [uiLockReason, setUiLockReason] = useState<null | "vote" | "migrate">(null);
 
-  const areaCards = useMemo(() => {
-    const goSet = new Set(goDecidedIds);
-    const noSet = new Set(notGoDecidedIds);
-    const go: string[] = [];
-    const notGo: string[] = [];
-    const vs: string[] = [];
-    const neutral: string[] = [];
-
-    relevantCardIds.forEach((cardId) => {
-      if (goSet.has(cardId)) {
-        go.push(cardId);
-        return;
-      }
-      if (noSet.has(cardId)) {
-        notGo.push(cardId);
-        return;
-      }
-      const responses = cardDetails.get(cardId) || [];
-      if (!responses.length) {
-        neutral.push(cardId);
-        return;
-      }
-      const positiveCount = responses.filter((r) => positiveCategories.includes(r.category)).length;
-      const negativeCount = responses.filter((r) => negativeCategories.includes(r.category)).length;
-      const neutralCount = responses.filter((r) => r.category === "neutral").length;
-      const hasNeutralReason = responses.some((r) => r.category === "neutral" && r.reason);
-
-      if (participantCount > 0 && positiveCount === participantCount && positiveCount > 0) {
-        go.push(cardId);
-        return;
-      }
-      if (participantCount > 0 && negativeCount === participantCount && negativeCount > 0) {
-        notGo.push(cardId);
-        return;
-      }
-      if ((positiveCount > 0 && negativeCount > 0) || hasNeutralReason) {
-        vs.push(cardId);
-        return;
-      }
-      if (positiveCount > 0 && neutralCount > 0) {
-        vs.push(cardId);
-        return;
-      }
-      if (negativeCount > 0 && neutralCount > 0) {
-        vs.push(cardId);
-        return;
-      }
-      if (positiveCount === 0 && negativeCount === 0) {
-        neutral.push(cardId);
-        return;
-      }
-      vs.push(cardId);
-    });
-
-    return {
-      go: sortByAgreement(go),
-      notGo: sortByAgreement(notGo),
-      vs: sortByAgreement(vs),
-      neutral: sortByAgreement(neutral),
-    };
-  }, [goDecidedIds, notGoDecidedIds, relevantCardIds, cardDetails, participantCount]);
-
-  const activeVotes = selectedCardId ? currentVotes : { go: [], notGo: [] };
-
-  const stateRef = useMemo(() => {
-    if (!roomId || typeof roomId !== "string") return null;
-    return doc(db, "rooms", roomId, "meta", "play3State");
-  }, [roomId]);
-
-  const votesCollectionRef = useMemo(() => {
-    if (!roomId || typeof roomId !== "string") return null;
-    return collection(db, "rooms", roomId, "play3Votes");
-  }, [roomId]);
-
-  const uniqueName = userName?.trim() || "匿名";
-
-  useEffect(() => {
-    if (!stateRef) return;
-    void (async () => {
-      try {
-        const snap = await getDoc(stateRef);
-        if (!snap.exists()) return;
-        const data = snap.data() as Record<string, unknown>;
-        if (data && Object.prototype.hasOwnProperty.call(data, "votes")) {
-          await setDoc(stateRef, { votes: deleteField() }, { merge: true });
-        }
-      } catch (error) {
-        console.error("Failed to cleanup legacy votes field", error);
-      }
-    })();
-  }, [stateRef]);
-
-  const finalizeCard = async (cardId: string, status: "go" | "no") => {
+  const classify = async (
+    id: string,
+    status: "go" | "no" | "vs" | "neutral",
+    pending?: boolean
+  ) => {
     if (!roomId || typeof roomId !== "string") return;
-    if (!stateRef || !votesCollectionRef) return;
-
-    const voteDocRef = doc(votesCollectionRef, cardId);
-
-    await runTransaction(db, async (transaction) => {
-      const metaSnap = await transaction.get(stateRef);
-      const metaState = ensureMetaState(
-        metaSnap.exists() ? (metaSnap.data() as Partial<Play3MetaState>) : undefined
-      );
-
-      transaction.delete(voteDocRef);
-      transaction.set(
-        stateRef,
-        {
-          holds: metaState.holds.filter((id) => id !== cardId),
-          activeCardId: null,
-          votes: deleteField(),
-        },
-        { merge: true }
-      );
-    });
-
+    if (uiLocked) return; // ロック中は操作不可
     await setDoc(
-      doc(db, "rooms", roomId, "goNo", cardId),
+      doc(db, "rooms", roomId, "play3Assignments", id),
       {
-        status: status === "go" ? "go" : "no",
-        decidedBy: uniqueName,
-        decidedAt: serverTimestamp(),
+        status,
+        pending: !!pending,
+        updatedAt: serverTimestamp(),
+        updatedBy: userName || "unknown",
       },
       { merge: true }
     );
-
-    setSelectedCardId(null);
-    setCurrentVotes({ go: [], notGo: [] });
+    closeCard();
   };
 
-  const handleVote = async (cardId: string, vote: "go" | "notGo") => {
-    if (!stateRef || !votesCollectionRef) return;
-
-    const voteDocRef = doc(votesCollectionRef, cardId);
-
-    const result = await runTransaction(db, async (transaction) => {
-      const metaSnap = await transaction.get(stateRef);
-      const metaState = ensureMetaState(
-        metaSnap.exists() ? (metaSnap.data() as Partial<Play3MetaState>) : undefined
-      );
-
-      const voteSnap = await transaction.get(voteDocRef);
-      const existing = ensureVoteState(
-        voteSnap.exists() ? (voteSnap.data() as Partial<CardVoteState>) : undefined
-      );
-
-      const sanitizedGo = existing.go.filter((n) => n !== uniqueName);
-      const sanitizedNo = existing.notGo.filter((n) => n !== uniqueName);
-      const updatedEntry: CardVoteState =
-        vote === "go"
-          ? { go: [...sanitizedGo, uniqueName], notGo: sanitizedNo }
-          : { go: sanitizedGo, notGo: [...sanitizedNo, uniqueName] };
-
-      transaction.set(voteDocRef, updatedEntry, { merge: false });
-      transaction.set(
-        stateRef,
-        {
-          holds: metaState.holds.filter((id) => id !== cardId),
-          activeCardId: cardId,
-          votes: deleteField(),
-        },
-        { merge: true }
-      );
-
-      return { updatedEntry };
-    });
-
-    setSelectedCardId(cardId);
-    setCurrentVotes(result.updatedEntry);
-
-    if (participantCount > 0) {
-      if (result.updatedEntry.go.length === participantCount) {
-        await finalizeCard(cardId, "go");
-      } else if (result.updatedEntry.notGo.length === participantCount) {
-        await finalizeCard(cardId, "no");
+  // ===== 全員投票モード =====
+  type ActiveVote =
+    | {
+        cardId: string;
+        sessionId: string;
+        modalOpen: boolean;
+        initiatedBy?: string;
       }
-    }
-  };
+    | null;
+  const [activeVote, setActiveVote] = useState<ActiveVote>(null);
+  const [voteMap, setVoteMap] = useState<Record<string, "go" | "no">>({});
+  const [myVoteChoice, setMyVoteChoice] = useState<"go" | "no" | null>(null);
 
-  const handleHold = async (cardId: string) => {
-    if (!stateRef) return;
-
-    await runTransaction(db, async (transaction) => {
-      const snap = await transaction.get(stateRef);
-      const current = ensureMetaState(
-        snap.exists() ? (snap.data() as Partial<Play3MetaState>) : undefined
-      );
-      const alreadyHeld = current.holds.includes(cardId);
-      const newHolds = alreadyHeld ? current.holds : [...current.holds, cardId];
-
-      transaction.set(
-        stateRef,
-        {
-          holds: newHolds,
-          activeCardId: null,
-          votes: deleteField(),
-        },
-        { merge: true }
-      );
+  // 状態購読（全員へモーダル同期）
+  useEffect(() => {
+    if (!roomId || typeof roomId !== "string") return;
+    const unsub = onSnapshot(doc(db, "rooms", roomId, "play3State", "state"), (snap) => {
+      const data: any = snap.data();
+      if (data) {
+        const next: ActiveVote = {
+          cardId: data.cardId || "",
+          sessionId: data.sessionId || "",
+          modalOpen: !!data.modalOpen,
+          initiatedBy: data.initiatedBy,
+        };
+        setActiveVote(next);
+        if (next.modalOpen && next.cardId) {
+          setCardModal((m) => (m?.id === next.cardId ? m : { id: next.cardId, flipped: false }));
+        }
+      } else {
+        setActiveVote(null);
+      }
     });
+    return () => unsub();
+  }, [roomId]);
 
-    setSelectedCardId(null);
-    setCurrentVotes({ go: [], notGo: [] });
+  // 投票状況購読（モーダル表示中のみ）
+  useEffect(() => {
+    if (!roomId || typeof roomId !== "string") return;
+    const cid = activeVote?.cardId;
+    if (!cid || !activeVote?.modalOpen) {
+      setVoteMap({});
+      return;
+    }
+    const nameToId = new Map<string, string>(participants.map((p) => [p.name, p.id]));
+    const validIds = new Set(participants.map((p) => p.id));
+    const unsub = onSnapshot(doc(db, "rooms", roomId, "play3Votes", cid), (snap) => {
+      const data: any = snap.data();
+      const raw = data?.sessionId === activeVote.sessionId ? (data?.votes || {}) : {};
+      // 正規化: userName キーが来ても userId に寄せる
+      const normalized: Record<string, "go" | "no"> = {};
+      Object.entries(raw).forEach(([k, v]) => {
+        const vv = v as "go" | "no";
+        if (validIds.has(k)) {
+          normalized[k] = vv;
+        } else if (nameToId.has(k)) {
+          normalized[nameToId.get(k)!] = vv;
+        } else {
+          // 不明キーはそのまま保持（互換）
+          normalized[k] = vv;
+        }
+      });
+      setVoteMap(normalized);
+    });
+    return () => unsub();
+  }, [roomId, activeVote?.cardId, activeVote?.sessionId, activeVote?.modalOpen, participants]);
+
+  // 全員投票完了で自動判定・クローズ（userId キーで集計）
+  useEffect(() => {
+    if (!activeVote?.modalOpen) return;
+    const total = participants.length;
+    if (total <= 0 || !activeVote.cardId) return;
+    const byId: Record<string, "go" | "no"> = {};
+    for (const p of participants) {
+      const v = voteMap[p.id] as "go" | "no" | undefined;
+      if (v) byId[p.id] = v;
+    }
+    // 自分のローカル選択がまだ反映されていない場合の補完
+    if (myUserId && myVoteChoice && !byId[myUserId]) byId[myUserId] = myVoteChoice;
+    const voted = Object.keys(byId).length;
+    if (voted >= total) {
+      const votes = Object.values(byId);
+      const allGo = votes.every((v) => v === "go");
+      const allNo = votes.every((v) => v === "no");
+      (async () => {
+        if (allGo)
+          await setDoc(
+            doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
+            {
+              status: "go",
+              pending: false,
+              updatedAt: serverTimestamp(),
+              updatedBy: userName || "unknown",
+            },
+            { merge: true }
+          );
+        else if (allNo)
+          await setDoc(
+            doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
+            {
+              status: "no",
+              pending: false,
+              updatedAt: serverTimestamp(),
+              updatedBy: userName || "unknown",
+            },
+            { merge: true }
+          );
+        else
+          await setDoc(
+            doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
+            {
+              status: "vs",
+              pending: true,
+              updatedAt: serverTimestamp(),
+              updatedBy: userName || "unknown",
+            },
+            { merge: true }
+          );
+        await setDoc(
+          doc(db, "rooms", roomId!, "play3State", "state"),
+          { modalOpen: false, closedAt: serverTimestamp() },
+          { merge: true }
+        );
+        setUiLocked(false);
+        setUiLockReason(null);
+        setMyVoteChoice(null);
+        closeCard();
+      })();
+    }
+  }, [activeVote?.modalOpen, voteMap, participants, myVoteChoice, roomId, myUserId, userName]);
+
+  const startVote = async (choice: "go" | "no", targetCardId?: string) => {
+    if (!roomId || typeof roomId !== "string") return;
+    const cid = targetCardId || cardModal?.id;
+    if (!cid) return;
+    const sessionId = `${cid}-${Date.now()}`;
+    await setDoc(
+      doc(db, "rooms", roomId, "play3State", "state"),
+      {
+        cardId: cid,
+        modalOpen: true,
+        sessionId,
+        initiatedBy: userName || "unknown",
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    const myKey = myUserId;
+    await setDoc(
+      doc(db, "rooms", roomId, "play3Votes", cid),
+      {
+        sessionId,
+        updatedAt: serverTimestamp(),
+        [`votes.${myKey}`]: choice,
+      } as any,
+      { merge: true }
+    );
+    setUiLocked(true); // 最初に押した人はロック
+    setUiLockReason("vote");
+    setMyVoteChoice(choice);
+    // 押した瞬間に自分の投票アイコンを出す（楽観更新）
+    try {
+      setVoteMap((prev) => ({
+        ...prev,
+        [myUserId]: choice,
+      }));
+    } catch {}
   };
 
-  const renderAvatar = (name: string, highlight?: boolean) => {
-    return (
-      <div
-        key={name}
-        onClick={() => setOpenParticipant((prev) => (prev === name ? null : name))}
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: "50%",
-          background: highlight ? "#22d3ee" : "#0f172a",
-          color: "#fff",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontWeight: 800,
-          cursor: "pointer",
-          boxShadow: highlight ? "0 0 0 3px rgba(34,211,238,0.4)" : "0 6px 16px rgba(15,23,42,0.35)",
-        }}
-        title={name}
-      >
-        {getInitial(name)}
-      </div>
+  const castVote = async (choice: "go" | "no") => {
+    if (
+      !roomId ||
+      typeof roomId !== "string" ||
+      !activeVote?.cardId ||
+      !activeVote?.sessionId
+    )
+      return;
+    // 押した瞬間に自分の投票アイコンを出す（楽観更新）
+    try {
+      setMyVoteChoice(choice);
+      setVoteMap((prev) => ({
+        ...prev,
+        [myUserId]: choice,
+      }));
+    } catch {}
+    const myKey = myUserId;
+    await setDoc(
+      doc(db, "rooms", roomId, "play3Votes", activeVote.cardId),
+      {
+        sessionId: activeVote.sessionId,
+        updatedAt: serverTimestamp(),
+        [`votes.${myKey}`]: choice,
+      } as any,
+      { merge: true }
     );
   };
 
-  const renderCard = (cardId: string) => {
-    const info = getCardInfo(cardId);
-    const agreement = agreementMap.get(cardId) ?? 0;
-    const isHold = sharedState.holds.includes(cardId);
-    return (
-      <div
-        key={cardId}
-        onClick={() => {
-          setSelectedCardId(cardId);
-          setShowBackSide(false);
-        }}
-        style={{
-          flex: "0 0 220px",
-          maxWidth: 220,
-          borderRadius: 16,
-          overflow: "hidden",
-          border: isHold ? "3px solid #fbbf24" : "1px solid rgba(148,163,184,0.4)",
-          boxShadow: isHold
-            ? "0 12px 30px rgba(250,204,21,0.35)"
-            : "0 10px 24px rgba(15,23,42,0.25)",
-          cursor: "pointer",
-          background: "#fff",
-          display: "flex",
-          flexDirection: "column",
-          transition: "transform .2s ease, box-shadow .2s ease",
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLDivElement).style.transform = "translateY(-2px)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
-        }}
-      >
-        <div style={{ height: 140, background: "#fff" }}>
-          <img
-            src={info?.src || "/placeholder-card.png"}
-            alt={info?.title || cardId}
-            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
-          />
-        </div>
-        <div style={{ padding: "12px 14px", display: "grid", gap: 6 }}>
-          <div style={{ fontWeight: 800, color: "#0f172a", fontSize: 16 }}>{info?.title || cardId}</div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>合致率 {agreement.toFixed(0)}%</div>
-          {isHold && (
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 800,
-                color: "#92400e",
-                background: "rgba(251,191,36,0.18)",
-                borderRadius: 999,
-                padding: "3px 8px",
-                textAlign: "center",
-              }}
-            >
-              保留中
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  const renderArea = (
-    title: string,
-    areaKey: keyof typeof areaPalette,
-    cards: string[],
-    extra?: React.ReactNode
-  ) => {
-    const palette = areaPalette[areaKey];
-    return (
-      <div
-        style={{
-          borderRadius: 24,
-          padding: 20,
-          background: palette.background,
-          border: `3px solid ${palette.border}`,
-          display: "flex",
-          flexDirection: "column",
-          gap: 16,
-          minHeight: 220,
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ color: palette.titleColor, fontWeight: 900, fontSize: 20 }}>{title}</div>
-          <div style={{ color: palette.titleColor, fontWeight: 800, fontSize: 14 }}>{cards.length} 枚</div>
-        </div>
-        {extra}
-        <div
-          style={{
-            display: "flex",
-            gap: 16,
-            overflowX: "auto",
-            paddingBottom: 8,
-          }}
-        >
-          {cards.map((cardId) => renderCard(cardId))}
-        </div>
-      </div>
-    );
-  };
+  // Neutral 折りたたみ
+  const [neutralOpen, setNeutralOpen] = useState(false);
 
   if (isLoading) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "linear-gradient(135deg, #eff6ff 0%, #ede9fe 100%)",
-          fontSize: 20,
-          color: "#0f172a",
-          fontWeight: 700,
-        }}
-      >
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
         読み込み中...
       </div>
     );
   }
 
-  const noData = !isLoading && userSelections.length === 0;
+  // 整列済み ID
+  const goSorted = sortByAgreement(goIds);
+  const noSorted = sortByAgreement(noIds);
+  const vsSorted = sortByAgreement(vsIds);
+  const neuSorted = sortByAgreement(neutralIds);
 
-  const selectedCardDetails = selectedCardId ? cardDetails.get(selectedCardId) || [] : [];
+  // 縮小時はカード幅も少し小さく
+  const TILE_W = scale < 1 ? 180 : 220;
 
   return (
     <div
       style={{
         minHeight: "100vh",
-        background: "radial-gradient(circle at top, #f8fafc 0%, #e2e8f0 45%, #f1f5f9 100%)",
-        paddingBottom: 80,
+        background: "#fff",
+        overflowX: "hidden",
+        cursor: uiLocked && uiLockReason === "vote" ? "progress" : "default",
       }}
     >
-      {showIntro && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15,23,42,0.86)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 60,
-          }}
-        >
-          <div
-            style={{
-              maxWidth: 720,
-              background: "linear-gradient(135deg, rgba(254,242,242,0.95) 0%, rgba(255,247,237,0.95) 100%)",
-              padding: "48px 56px",
-              borderRadius: 32,
-              boxShadow: "0 40px 120px rgba(15,23,42,0.45)",
-              textAlign: "center",
-              color: "#7f1d1d",
-            }}
-          >
-            <div style={{ fontSize: 28, fontWeight: 900, marginBottom: 24 }}>
-              全員の要望に沿ってカードを各エリアに当てはめました！
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "#b45309" }}>
-              VSのカードがなくなったらゲーム終了です！
-            </div>
-            <button
-              onClick={() => setShowIntro(false)}
-              style={{
-                marginTop: 36,
-                padding: "14px 32px",
-                borderRadius: 999,
-                border: "none",
-                background: "linear-gradient(135deg,#dc2626,#fb923c)",
-                color: "#fff",
-                fontWeight: 900,
-                fontSize: 18,
-                cursor: "pointer",
-                boxShadow: "0 16px 40px rgba(248,113,113,0.4)",
-              }}
-            >
-              了解！
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div style={{ maxWidth: 1280, margin: "0 auto", padding: "32px 24px", position: "relative" }}>
+      <div
+        style={{
+          transform: `scale(${scale})`,
+          transformOrigin: "top center",
+          width: "100%",
+          margin: "0 auto",
+          boxSizing: "border-box",
+        }}
+      >
+        {/* ヘッダー行 */}
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 24,
-            marginBottom: 32,
+            alignItems: "center",
+            padding: "12px 16px",
+            borderBottom: "1px solid #e5e7eb",
           }}
         >
-          <div
-            style={{
-              background: "linear-gradient(135deg,#0ea5e9,#6366f1)",
-              color: "#fff",
-              padding: "20px 28px",
-              borderRadius: 28,
-              boxShadow: "0 20px 60px rgba(14,165,233,0.35)",
-              minWidth: 260,
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 700, opacity: 0.9 }}>全体合致率</div>
-            <div style={{ fontSize: 44, fontWeight: 900 }}>{overallAgreement.toFixed(0)}%</div>
+          <div style={{ fontWeight: 900, color: "#111827" }}>
+            合致率 {overallAgreement.toFixed(0)}%
           </div>
-
-          <div style={{ flex: 1, display: "flex", justifyContent: "flex-end", gap: 16, position: "relative" }}>
-            {participantOrder.map((p) => renderAvatar(p.userName, p.userName === uniqueName))}
-            {openParticipant && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: 60,
-                  right: 0,
-                  background: "#fff",
-                  borderRadius: 20,
-                  boxShadow: "0 24px 80px rgba(15,23,42,0.3)",
-                  padding: 20,
-                  width: 360,
-                  zIndex: 20,
-                }}
-              >
-                {(() => {
-                  const target = participantOrder.find((p) => p.userName === openParticipant);
-                  if (!target) return null;
-                  return (
-                    <div style={{ display: "grid", gap: 12 }}>
-                      <div style={{ fontWeight: 900, fontSize: 18, color: "#0f172a" }}>{target.userName}</div>
-                      <div style={{ fontSize: 13, color: "#475569" }}>プラン名: <strong>{target.planName || "未入力"}</strong></div>
-                      {(Object.entries(target.categories) as [CategoryKey, { id: string }[]][]).map(([category, cards]) => (
-                        <div key={category} style={{ display: "grid", gap: 6 }}>
-                          <div style={{ fontSize: 12, fontWeight: 800, color: "#334155" }}>{categoryLabel[category]}</div>
-                          <div style={{
-                            fontSize: 12,
-                            color: "#475569",
-                            background: "#f8fafc",
-                            borderRadius: 12,
-                            padding: "8px 10px",
-                            border: "1px solid #e2e8f0",
-                          }}>
-                            {formatCardNames(cards.map((c) => c.id))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
+          {renderAvatars()}
         </div>
 
-        {noData ? (
-          <div
+        {/* 開始メッセージ */}
+        <div
+          style={{
+            padding: "10px 16px",
+            background: "#fffbeb",
+            borderBottom: "1px solid #fde68a",
+            color: "#92400e",
+            fontWeight: 700,
+          }}
+        >
+          全員の要望に沿ってカードを各エリアに当てはめました！VSのカードがなくなったらゲーム終了です！
+        </div>
+
+        {/* 上段: 行く / 行かない */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+            gap: 12,
+            padding: 12,
+          }}
+        >
+          {/* 行く */}
+          <section
             style={{
-              background: "rgba(255,255,255,0.9)",
-              padding: 40,
-              borderRadius: 24,
-              textAlign: "center",
-              fontWeight: 700,
-              color: "#475569",
+              minWidth: 0,
+              background: "#fee2e2",
+              border: "2px solid #fca5a5",
+              borderRadius: 12,
+              padding: 10,
             }}
           >
-            参加者のデータがまだありません。
-          </div>
-        ) : (
-          <div style={{ display: "grid", gap: 32 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 24 }}>
-              {renderArea("行く", "go", areaCards.go)}
-              {renderArea("行かない", "notGo", areaCards.notGo)}
-            </div>
-
-            {renderArea("VS（議論すべき目的地）", "vs", areaCards.vs, (
-              <div style={{ color: "#7c2d12", fontWeight: 700, fontSize: 13 }}>
-                行きたい派と行きたくない派、もしくは理由付きのどちらでもいいが混在しているカードです。
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <div style={{ fontWeight: 900, color: "#7f1d1d" }}>行く</div>
+              <div style={{ color: "#7f1d1d", fontWeight: 700 }}>
+                {goSorted.length}
               </div>
-            ))}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                overflowX: "auto",
+                paddingBottom: 4,
+                flexWrap: "nowrap",
+              }}
+            >
+              {goSorted.map((id) => {
+                const info = getCard(id);
+                const ag = agreementMap.get(id) || 0;
+                return (
+                  <div
+                    key={id}
+                    onClick={() => openCard(id)}
+                    style={{
+                      cursor: "pointer",
+                      width: TILE_W,
+                      flex: "0 0 auto",
+                      border: "1px solid #e5e7eb",
+                      background: "#fff",
+                      borderRadius: 12,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div style={{ width: "100%", aspectRatio: "3/2", background: "#fff" }}>
+                      <img
+                        src={info?.src}
+                        alt={info?.title}
+                        style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        padding: "6px 8px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div style={{ fontWeight: 800, color: "#111827", fontSize: 12 }}>
+                        {info?.title}
+                      </div>
+                      <div style={{ fontWeight: 800, color: "#334155", fontSize: 12 }}>
+                        {ag.toFixed(0)}%
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
 
-            <div>
-              <button
-                onClick={() => setShowNeutralArea((prev) => !prev)}
+          {/* 行かない */}
+          <section
+            style={{
+              minWidth: 0,
+              background: "#1e3a8a",
+              border: "2px solid #334155",
+              borderRadius: 12,
+              padding: 10,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <div style={{ fontWeight: 900, color: "#fff" }}>行かない</div>
+              <div style={{ color: "#e2e8f0", fontWeight: 700 }}>
+                {noSorted.length}
+              </div>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                overflowX: "auto",
+                paddingBottom: 4,
+                flexWrap: "nowrap",
+              }}
+            >
+              {noSorted.map((id) => {
+                const info = getCard(id);
+                const ag = agreementMap.get(id) || 0;
+                return (
+                  <div
+                    key={id}
+                    onClick={() => openCard(id)}
+                    style={{
+                      cursor: "pointer",
+                      width: TILE_W,
+                      flex: "0 0 auto",
+                      border: "1px solid #475569",
+                      background: "#fff",
+                      borderRadius: 12,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div style={{ width: "100%", aspectRatio: "3/2", background: "#fff" }}>
+                      <img
+                        src={info?.src}
+                        alt={info?.title}
+                        style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        padding: "6px 8px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div style={{ fontWeight: 800, color: "#111827", fontSize: 12 }}>
+                        {info?.title}
+                      </div>
+                      <div style={{ fontWeight: 800, color: "#334155", fontSize: 12 }}>
+                        {ag.toFixed(0)}%
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+
+        {/* 中央: 議論中（VS） */}
+        <div style={{ padding: "0 12px 12px" }}>
+          <section
+            style={{
+              background: "#ffedd5",
+              border: "2px solid #fdba74",
+              borderRadius: 12,
+              padding: 10,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <div style={{ fontWeight: 900, color: "#9a3412" }}>議論中（VS）</div>
+              <div style={{ color: "#9a3412", fontWeight: 700 }}>{vsSorted.length}</div>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                overflowX: "auto",
+                paddingBottom: 4,
+                flexWrap: "nowrap",
+              }}
+            >
+              {vsSorted.map((id) => {
+                const info = getCard(id);
+                const ag = agreementMap.get(id) || 0;
+                const pending = pendingIds.has(id);
+                return (
+                  <div
+                    key={id}
+                    onClick={() => openCard(id)}
+                    style={{
+                      cursor: "pointer",
+                      width: TILE_W,
+                      flex: "0 0 auto",
+                      border: pending ? "6px solid #000" : "2px solid #e5e7eb",
+                      background: "#fff",
+                      borderRadius: 12,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div style={{ width: "100%", aspectRatio: "3/2", background: "#fff" }}>
+                      <img
+                        src={info?.src}
+                        alt={info?.title}
+                        style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        padding: "6px 8px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div style={{ fontWeight: 800, color: "#111827", fontSize: 12 }}>
+                        {info?.title}
+                      </div>
+                      <div style={{ fontWeight: 800, color: "#334155", fontSize: 12 }}>
+                        {ag.toFixed(0)}%
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+
+        {/* 下部: どちらでも（折りたたみ・モーダル表示） */}
+        <div style={{ padding: "0 12px 80px" }}>
+          <section
+            style={{
+              background: "#e5e7eb",
+              border: "2px solid #d1d5db",
+              borderRadius: 12,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: 10,
+                cursor: "pointer",
+              }}
+              onClick={() => setNeutralOpen(true)}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ fontWeight: 900, color: "#374151" }}>どちらでも</div>
+                <div style={{ transform: neutralOpen ? "rotate(180deg)" : "rotate(0deg)" }}>
+                  ^
+                </div>
+              </div>
+              <div style={{ color: "#374151", fontWeight: 700 }}>{neuSorted.length}</div>
+            </div>
+          </section>
+        </div>
+
+        {/* どちらでも一覧モーダル */}
+        {neutralOpen && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 110,
+            }}
+            onClick={() => setNeutralOpen(false)}
+          >
+            <div
+              style={{
+                width: "min(92vw, 960px)",
+                maxHeight: "80vh",
+                background: "#fff",
+                borderRadius: 12,
+                padding: 16,
+                boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+                overflow: "auto",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
                 style={{
                   display: "flex",
+                  justifyContent: "space-between",
                   alignItems: "center",
-                  gap: 8,
-                  fontWeight: 800,
-                  color: "#1f2937",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
                   marginBottom: 12,
                 }}
               >
-                <span style={{ fontSize: 18 }}>{showNeutralArea ? "▽" : "△"}</span>
-                どちらでもいいエリアを{showNeutralArea ? "閉じる" : "開く"}
-              </button>
-              {showNeutralArea && renderArea("どちらでもいい", "neutral", areaCards.neutral)}
+                <div style={{ fontWeight: 900, fontSize: 18, color: "#111827" }}>
+                  どちらでも（{neuSorted.length}）
+                </div>
+                <button
+                  onClick={() => setNeutralOpen(false)}
+                  style={{
+                    border: "1px solid #e5e7eb",
+                    background: "#fff",
+                    borderRadius: 8,
+                    padding: "6px 10px",
+                    fontWeight: 800,
+                  }}
+                >
+                  閉じる
+                </button>
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                  gap: 12,
+                }}
+              >
+                {neuSorted.map((id) => {
+                  const info = getCard(id);
+                  const ag = agreementMap.get(id) || 0;
+                  return (
+                    <div
+                      key={id}
+                      onClick={() => {
+                        setNeutralOpen(false);
+                        openCard(id);
+                      }}
+                      style={{
+                        cursor: "pointer",
+                        border: "1px solid #e5e7eb",
+                        background: "#fff",
+                        borderRadius: 12,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div style={{ width: "100%", aspectRatio: "3/2", background: "#fff" }}>
+                        <img
+                          src={info?.src}
+                          alt={info?.title}
+                          style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                        />
+                      </div>
+                      <div
+                        style={{
+                          padding: "6px 8px",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <div style={{ fontWeight: 800, color: "#111827", fontSize: 12 }}>
+                          {info?.title}
+                        </div>
+                        <div style={{ fontWeight: 800, color: "#334155", fontSize: 12 }}>
+                          {ag.toFixed(0)}%
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
+
+        {/* 参加者情報モーダル */}
+        {activeUserInfo &&
+          (() => {
+            const user = selections.find((s) => s.userId === activeUserInfo);
+            const counts = user
+              ? {
+                  veryWant: user.categories.veryWant.length,
+                  want: user.categories.want.length,
+                  neutral: user.categories.neutral.length,
+                  dont: user.categories.dont.length,
+                  veryDont: user.categories.veryDont.length,
+                }
+              : { veryWant: 0, want: 0, neutral: 0, dont: 0, veryDont: 0 };
+            const catOrder: Array<{ key: keyof typeof counts; label: string }> = [
+              { key: "veryWant", label: "特に行きたい" },
+              { key: "want", label: "行きたい" },
+              { key: "neutral", label: "どちらでも" },
+              { key: "dont", label: "行きたくない" },
+              { key: "veryDont", label: "特に行きたくない" },
+            ];
+            const getList = (k: keyof typeof counts) =>
+              user ? user.categories[k] : [];
+            return (
+              <div
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.45)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 100,
+                }}
+                onClick={() => setActiveUserInfo(null)}
+              >
+                <div
+                  style={{
+                    width: 420,
+                    background: "#fff",
+                    borderRadius: 12,
+                    padding: 16,
+                    boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+                    border: "1px solid #e5e7eb",
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>
+                    {user?.userName}
+                  </div>
+                  <div style={{ color: "#374151", marginBottom: 10 }}>
+                    プラン名：<strong style={{ color: "#2563eb" }}>
+                      {user?.planName || "—"}
+                    </strong>
+                  </div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {catOrder.map(({ key, label }) => {
+                      const expanded = !!userInfoExpanded[key as string];
+                      const toggle = () =>
+                        setUserInfoExpanded((prev) => ({
+                          ...prev,
+                          [key as string]: !expanded,
+                        }));
+                      const list = getList(key);
+                      return (
+                        <div
+                          key={key}
+                          style={{ border: "1px solid #e5e7eb", borderRadius: 10 }}
+                        >
+                          <div
+                            onClick={toggle}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              padding: "8px 10px",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <div>{label}</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <span style={{ fontWeight: 800 }}>{list.length}</span>
+                              <span
+                                style={{
+                                  transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+                                }}
+                              >
+                                ^
+                              </span>
+                            </div>
+                          </div>
+                          {expanded && (
+                            <div
+                              style={{
+                                padding: "8px 10px",
+                                display: "grid",
+                                gap: 6,
+                              }}
+                            >
+                              {list.length ? (
+                                list.map((c, idx) => {
+                                  const info = ALL_CARDS.find((x) => x.id === c.id);
+                                  const reason = (c as any).reason || "";
+                                  return (
+                                    <div
+                                      key={idx}
+                                      style={{
+                                        border: "1px solid #e5e7eb",
+                                        borderRadius: 8,
+                                        padding: 8,
+                                      }}
+                                    >
+                                      <div
+                                        style={{ fontWeight: 700, color: "#0f172a" }}
+                                      >
+                                        {info?.title || c.id}
+                                      </div>
+                                      <div
+                                        style={{
+                                          fontSize: 12,
+                                          color: reason ? "#374151" : "#94a3b8",
+                                        }}
+                                      >
+                                        理由: {reason || "（なし）"}
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                                  カードはありません
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ textAlign: "right", marginTop: 12 }}>
+                    <button
+                      onClick={() => setActiveUserInfo(null)}
+                      style={{
+                        padding: "8px 12px",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 8,
+                        background: "#fff",
+                        fontWeight: 700,
+                      }}
+                    >
+                      閉じる
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+        {/* カード詳細モーダル */}
+        {cardModal &&
+          (() => {
+            const info = getCard(cardModal.id);
+            const users = selections.map((u) => {
+              let category: string = "neutral";
+              let reason = "";
+              if (u.categories.veryWant.some((c) => c.id === cardModal.id)) {
+                category = "veryWant";
+                reason =
+                  u.categories.veryWant.find((c) => c.id === cardModal.id)?.reason ||
+                  "";
+              } else if (u.categories.want.some((c) => c.id === cardModal.id))
+                category = "want";
+              else if (u.categories.dont.some((c) => c.id === cardModal.id))
+                category = "dont";
+              else if (u.categories.veryDont.some((c) => c.id === cardModal.id)) {
+                category = "veryDont";
+                reason =
+                  u.categories.veryDont.find((c) => c.id === cardModal.id)?.reason ||
+                  "";
+              } else if (u.categories.neutral.some((c) => c.id === cardModal.id))
+                category = "neutral";
+              return {
+                userName: u.userName,
+                planName: u.planName || "—",
+                category,
+                reason,
+              };
+            });
+            return (
+              <div
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.5)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 120,
+                }}
+                onClick={() => {
+                  // 全員投票モードの最中は外クリックで閉じられない（全員統一表示を維持）
+                  if (activeVote?.modalOpen) return;
+                  closeCard();
+                }}
+              >
+                <div
+                  style={{
+                    width: "min(92vw, 760px)",
+                    background: "#fff",
+                    borderRadius: 12,
+                    overflow: "hidden",
+                    boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 16,
+                      padding: 16,
+                      borderBottom: "1px solid #e5e7eb",
+                    }}
+                  >
+                    <div
+                      style={{
+                        flex: "0 0 240px",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div
+                        onClick={() =>
+                          setCardModal((m) => m && { ...m, flipped: !m.flipped })
+                        }
+                        style={{
+                          width: 220,
+                          height: 320,
+                          cursor: "pointer",
+                          border: "1px solid #e5e7eb",
+                          borderRadius: 12,
+                          overflow: "hidden",
+                          background: "#fff",
+                        }}
+                      >
+                        <img
+                          src={cardModal.flipped ? info?.backSrc || info?.src : info?.src}
+                          alt={info?.title}
+                          style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                        />
+                      </div>
+                      <div style={{ marginTop: 8, fontWeight: 800, color: "#111827" }}>
+                        {info?.title}
+                      </div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                        各ユーザーの選択（1人フェーズ時点）
+                      </div>
+                      <div style={{ display: "grid", gap: 8 }}>
+                        {users.map((u, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              border: "1px solid #e5e7eb",
+                              borderRadius: 10,
+                              padding: 8,
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                marginBottom: 4,
+                              }}
+                            >
+                              <div style={{ fontWeight: 800 }}>{u.userName}</div>
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  fontWeight: 800,
+                                  color: "#2563eb",
+                                }}
+                              >
+                                プラン名：{u.planName}
+                              </div>
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "spaceBetween",
+                                fontSize: 12,
+                                gap: 8,
+                                alignItems: "baseline",
+                              }}
+                            >
+                              <div>
+                                カテゴリ：
+                                <strong>
+                                  {
+                                    ({
+                                      veryWant: "特に行きたい",
+                                      want: "行きたい",
+                                      neutral: "どちらでも",
+                                      dont: "行きたくない",
+                                      veryDont: "特に行きたくない",
+                                    } as Record<string, string>)[u.category] || "—"
+                                  }
+                                </strong>
+                              </div>
+                              <div
+                                style={{
+                                  color: u.reason ? "#374151" : "#94a3b8",
+                                  marginLeft: "auto",
+                                }}
+                              >
+                                理由: {u.reason || "（なし）"}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      padding: 12,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    {/* 自分の過去投票に戻す */}
+                    {(() => {
+                      const me =
+                        selections.find(
+                          (s) => s.userName === userName || s.userId === userName
+                        ) || null;
+                      let prev: "go" | "no" | "neutral" | null = null;
+                      if (me) {
+                        if (
+                          me.categories.veryWant.some((c) => c.id === cardModal.id) ||
+                          me.categories.want.some((c) => c.id === cardModal.id)
+                        )
+                          prev = "go";
+                        else if (
+                          me.categories.veryDont.some((c) => c.id === cardModal.id) ||
+                          me.categories.dont.some((c) => c.id === cardModal.id)
+                        )
+                          prev = "no";
+                        else if (me.categories.neutral.some((c) => c.id === cardModal.id))
+                          prev = "neutral";
+                      }
+                      if (!prev || prev === "neutral") return null;
+                      const label = prev === "go" ? "行く" : "行かない";
+                      const disabled = uiLocked || !!activeVote?.modalOpen;
+                      return (
+                        <button
+                          disabled={disabled}
+                          onClick={() => classify(cardModal.id, prev)}
+                          style={{
+                            opacity: disabled ? 0.5 : 1,
+                            padding: "10px 14px",
+                            borderRadius: 10,
+                            border: "1px solid #e5e7eb",
+                            background: "#f8fafc",
+                            fontWeight: 800,
+                            color: "#0f172a",
+                          }}
+                        >
+                          {`自分の過去投票に戻す（${label}）`}
+                        </button>
+                      );
+                    })()}
+
+                    <div style={{ display: "flex", gap: 8, position: "relative" }}>
+                      <button
+                        onClick={() => {
+                          if (!activeVote?.modalOpen) classify(cardModal.id, "vs", true);
+                        }}
+                        disabled={uiLocked || !!activeVote?.modalOpen}
+                        style={{
+                          opacity: uiLocked || activeVote?.modalOpen ? 0.6 : 1,
+                          padding: "10px 14px",
+                          borderRadius: 10,
+                          border: "2px solid #fdba74",
+                          background: "#ffedd5",
+                          color: "#9a3412",
+                          fontWeight: 900,
+                        }}
+                      >
+                        保留して閉じる
+                      </button>
+
+                      {(() => {
+                        const myChoice = myVoteChoice || voteMap[myUserId];
+                        const hasVoted = !!myChoice;
+                        const votedNo = myChoice === "no";
+                        const votedGo = myChoice === "go";
+                        const goCount = participants.reduce((acc, p) => {
+                          const v = voteMap[p.id];
+                          const mine = p.id === myUserId ? myVoteChoice || v : v;
+                          return acc + (mine === "go" ? 1 : 0);
+                        }, 0);
+                        const noCount = participants.reduce((acc, p) => {
+                          const v = voteMap[p.id];
+                          const mine = p.id === myUserId ? myVoteChoice || v : v;
+                          return acc + (mine === "no" ? 1 : 0);
+                        }, 0);
+
+                        const noStyle: any = {
+                          padding: "10px 14px",
+                          borderRadius: 10,
+                          border: "none",
+                          background: votedNo ? "#172554" : "#1e3a8a",
+                          color: "#fff",
+                          fontWeight: 900,
+                          boxShadow: votedNo
+                            ? "0 0 0 3px rgba(30,58,138,0.35) inset"
+                            : undefined,
+                          transform: votedNo ? "translateY(1px)" : undefined,
+                          transition: "all .12s ease",
+                          opacity: hasVoted && !votedNo ? 0.6 : 1,
+                          cursor: hasVoted && !votedNo ? "not-allowed" : "pointer",
+                        };
+                        const goStyle: any = {
+                          padding: "10px 14px",
+                          borderRadius: 10,
+                          border: "none",
+                          background: votedGo ? "#b91c1c" : "#ef4444",
+                          color: "#fff",
+                          fontWeight: 900,
+                          boxShadow: votedGo
+                            ? "0 0 0 3px rgba(239,68,68,0.35) inset"
+                            : undefined,
+                          transform: votedGo ? "translateY(1px)" : undefined,
+                          transition: "all .12s ease",
+                          opacity: hasVoted && !votedGo ? 0.6 : 1,
+                          cursor: hasVoted && !votedGo ? "not-allowed" : "pointer",
+                        };
+
+                        // 投票進捗（押したかどうかの全体統計）
+                        const votedCount = displayParticipants.reduce((acc, p) => {
+                          const v = voteMap[p.id];
+                          const mine = p.id === myUserId ? myVoteChoice || v : v;
+                          return acc + (mine ? 1 : 0);
+                        }, 0);
+
+                        return (
+                          <>
+                            <div
+                              style={{
+                                position: "absolute",
+                                top: -24,
+                                right: 0,
+                                fontSize: 11,
+                                fontWeight: 800,
+                                color: "#374151",
+                                background: "rgba(255,255,255,0.8)",
+                                padding: "2px 6px",
+                                borderRadius: 8,
+                              }}
+                            >
+                              投票済み {votedCount}/{totalParticipants}
+                            </div>
+
+                            <div style={{ position: "relative" }}>
+                              <button
+                                aria-pressed={votedNo}
+                                disabled={hasVoted && !votedNo}
+                                onClick={() =>
+                                  !hasVoted
+                                    ? activeVote?.modalOpen &&
+                                      activeVote.cardId === cardModal.id
+                                      ? castVote("no")
+                                      : startVote("no", cardModal.id)
+                                    : undefined
+                                }
+                                style={noStyle}
+                              >
+                                行かない {noCount}/{totalParticipants}
+                              </button>
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  top: -10,
+                                  right: -8,
+                                  display: "flex",
+                                  zIndex: 5,
+                                  pointerEvents: "none",
+                                }}
+                              >
+                                {displayParticipants
+                                  .filter(
+                                    (p) =>
+                                      voteMap[p.id] === "no" ||
+                                      (p.id === myUserId && myVoteChoice === "no")
+                                  )
+                                  .map((p) => (
+                                    <span
+                                      key={p.id}
+                                      title={p.name}
+                                      style={{
+                                        width: 18,
+                                        height: 18,
+                                        borderRadius: "50%",
+                                        background: "#e2e8f0",
+                                        border: "1px solid #cbd5e1",
+                                        color: "#0f172a",
+                                        fontSize: 11,
+                                        fontWeight: 800,
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        marginLeft: -6,
+                                      }}
+                                    >
+                                      {p.name?.[0] || "?"}
+                                    </span>
+                                  ))}
+                              </div>
+                            </div>
+
+                            <div style={{ position: "relative" }}>
+                              <button
+                                aria-pressed={votedGo}
+                                disabled={hasVoted && !votedGo}
+                                onClick={() =>
+                                  !hasVoted
+                                    ? activeVote?.modalOpen &&
+                                      activeVote.cardId === cardModal.id
+                                      ? castVote("go")
+                                      : startVote("go", cardModal.id)
+                                    : undefined
+                                }
+                                style={goStyle}
+                              >
+                                行く {goCount}/{totalParticipants}
+                              </button>
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  top: -10,
+                                  right: -8,
+                                  display: "flex",
+                                  zIndex: 5,
+                                  pointerEvents: "none",
+                                }}
+                              >
+                                {displayParticipants
+                                  .filter(
+                                    (p) =>
+                                      voteMap[p.id] === "go" ||
+                                      (p.id === myUserId && myVoteChoice === "go")
+                                  )
+                                  .map((p) => (
+                                    <span
+                                      key={p.id}
+                                      title={p.name}
+                                      style={{
+                                        width: 18,
+                                        height: 18,
+                                        borderRadius: "50%",
+                                        background: "#fee2e2",
+                                        border: "1px solid #fecaca",
+                                        color: "#991b1b",
+                                        fontSize: 11,
+                                        fontWeight: 800,
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        marginLeft: -6,
+                                      }}
+                                    >
+                                      {p.name?.[0] || "?"}
+                                    </span>
+                                  ))}
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+        {/* スティッキーフッター（終了） */}
       </div>
 
       <div
         style={{
           position: "fixed",
-          bottom: 24,
-          left: 0,
-          right: 0,
-          display: "flex",
-          justifyContent: "center",
+          bottom: 16,
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 80,
         }}
       >
         <button
-          onClick={() => {
-            if (!roomId || typeof roomId !== "string") return;
-            router.push(`/room/${roomId}/result`);
+          disabled={vsSorted.length > 0 || uiLocked}
+          onClick={async () => {
+            if (!roomId || typeof roomId !== "string" || !userName) return;
+            await setDoc(
+              doc(db, "rooms", roomId, "play3Ready", userName),
+              {
+                userId: userName,
+                ready: true,
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+            setUiLocked(true);
+            setUiLockReason("migrate");
           }}
-          disabled={areaCards.vs.length > 0}
           style={{
-            padding: "16px 32px",
-            borderRadius: 999,
-            border: "none",
-            fontSize: 18,
-            fontWeight: 900,
-            background: areaCards.vs.length > 0
-              ? "linear-gradient(135deg,#cbd5f5,#94a3b8)"
-              : "linear-gradient(135deg,#10b981,#22d3ee)",
+            opacity: vsSorted.length > 0 || uiLocked ? 0.5 : 1,
+            background: "linear-gradient(135deg,#2563eb,#4f46e5)",
             color: "#fff",
-            cursor: areaCards.vs.length > 0 ? "not-allowed" : "pointer",
-            boxShadow: areaCards.vs.length > 0
-              ? "0 12px 30px rgba(148,163,184,0.35)"
-              : "0 20px 60px rgba(14,165,233,0.4)",
-            opacity: areaCards.vs.length > 0 ? 0.6 : 1,
+            fontWeight: 900,
+            padding: "12px 18px",
+            border: "none",
+            borderRadius: 12,
+            boxShadow: "0 10px 28px -8px rgba(37,99,235,0.55)",
+            cursor: vsSorted.length > 0 || uiLocked ? "not-allowed" : "pointer",
           }}
         >
           終了して結果を見る
         </button>
       </div>
 
-      {selectedCardId && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15,23,42,0.7)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 50,
-          }}
-        >
-          <div
-            style={{
-              width: "min(90vw, 880px)",
-              background: "#fff",
-              borderRadius: 28,
-              boxShadow: "0 40px 120px rgba(15,23,42,0.45)",
-              overflow: "hidden",
-              display: "grid",
-              gridTemplateColumns: "minmax(240px, 1fr) minmax(360px, 1.3fr)",
-              gap: 0,
-            }}
-          >
+      {/* ロック中オーバーレイ（全員の「終了」待ち） */}
+      {uiLocked &&
+        uiLockReason === "migrate" &&
+        (() => {
+          const readyCount = Object.values(play3Ready).filter(Boolean).length;
+          return (
             <div
               style={{
-                background: "#0f172a",
-                padding: 24,
+                position: "fixed",
+                inset: 0,
+                background: "rgba(255,255,255,0.7)",
+                backdropFilter: "blur(2px)",
+                zIndex: 200,
                 display: "flex",
-                flexDirection: "column",
-                gap: 16,
-                color: "#fff",
+                alignItems: "center",
+                justifyContent: "center",
+                pointerEvents: "auto",
               }}
             >
-              <div style={{ fontWeight: 900, fontSize: 18 }}>カード</div>
               <div
                 style={{
-                  borderRadius: 20,
-                  overflow: "hidden",
-                  border: "1px solid rgba(255,255,255,0.2)",
                   background: "#fff",
-                }}
-              >
-                <img
-                  src={
-                    showBackSide
-                      ? getCardInfo(selectedCardId)?.backSrc || "/placeholder-card.png"
-                      : getCardInfo(selectedCardId)?.src || "/placeholder-card.png"
-                  }
-                  alt={getCardInfo(selectedCardId)?.title || selectedCardId}
-                  style={{ width: "100%", height: 280, objectFit: "contain" }}
-                />
-              </div>
-              <button
-                onClick={() => setShowBackSide((prev) => !prev)}
-                style={{
-                  padding: "10px 16px",
-                  borderRadius: 999,
-                  border: "none",
-                  background: "rgba(248,250,252,0.12)",
-                  color: "#e2e8f0",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 12,
+                  padding: 16,
+                  boxShadow: "0 10px 40px rgba(0,0,0,0.15)",
                   fontWeight: 800,
-                  cursor: "pointer",
+                  color: "#0f172a",
                 }}
               >
-                {showBackSide ? "表面を見る" : "裏面を見る"}
-              </button>
-            </div>
-            <div style={{ padding: 28, display: "flex", flexDirection: "column", gap: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ fontWeight: 900, fontSize: 22, color: "#0f172a" }}>
-                  {getCardInfo(selectedCardId)?.title || selectedCardId}
-                </div>
-                <button
-                  onClick={() => setExpandedDetail((prev) => !prev)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "#64748b",
-                    fontWeight: 700,
-                  }}
-                >
-                  {expandedDetail ? "▽ 詳細を閉じる" : "△ 詳細を開く"}
-                </button>
-              </div>
-              <div style={{ display: "grid", gap: 12, maxHeight: expandedDetail ? 320 : 220, overflowY: "auto" }}>
-                {selectedCardDetails.map((detail, index) => {
-                  const chip = categoryChipColor[detail.category];
-                  return (
-                    <div
-                      key={`${detail.userName}-${index}`}
-                      style={{
-                        border: "1px solid #e2e8f0",
-                        borderRadius: 18,
-                        padding: 16,
-                        display: "grid",
-                        gap: 8,
-                        background: "#f8fafc",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div style={{ fontWeight: 800, color: "#0f172a" }}>{detail.userName}</div>
-                        <div
-                          style={{
-                            background: chip.bg,
-                            color: chip.text,
-                            border: `1px solid ${chip.border}`,
-                            borderRadius: 999,
-                            padding: "4px 10px",
-                            fontSize: 12,
-                            fontWeight: 900,
-                          }}
-                        >
-                          {categoryLabel[detail.category]}
-                        </div>
-                      </div>
-                      {expandedDetail && (
-                        <>
-                          <div style={{ fontSize: 12, color: "#475569" }}>
-                            プラン名: <strong>{detail.planName || "未入力"}</strong>
-                          </div>
-                          <div style={{ fontSize: 12, color: detail.reason ? "#334155" : "#94a3b8" }}>
-                            理由: {detail.reason || "（理由なし）"}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ display: "flex", gap: 12, marginTop: "auto" }}>
-                <button
-                  onClick={() => handleVote(selectedCardId, "go")}
-                  style={{
-                    flex: 1,
-                    padding: "12px 16px",
-                    borderRadius: 16,
-                    border: "none",
-                    background: "linear-gradient(135deg,#ef4444,#f97316)",
-                    color: "#fff",
-                    fontWeight: 900,
-                    position: "relative",
-                    cursor: "pointer",
-                  }}
-                >
-                  行く
-                  <div style={{ position: "absolute", top: 6, right: 10, display: "flex", gap: 4 }}>
-                    {activeVotes.go.map((name) => (
-                      <div
-                        key={`go-${name}`}
-                        style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: "50%",
-                          background: "rgba(255,255,255,0.18)",
-                          color: "#fff",
-                          fontSize: 11,
-                          fontWeight: 900,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        {getInitial(name)}
-                      </div>
-                    ))}
-                  </div>
-                </button>
-                <button
-                  onClick={() => handleVote(selectedCardId, "notGo")}
-                  style={{
-                    flex: 1,
-                    padding: "12px 16px",
-                    borderRadius: 16,
-                    border: "none",
-                    background: "linear-gradient(135deg,#1e40af,#2563eb)",
-                    color: "#fff",
-                    fontWeight: 900,
-                    position: "relative",
-                    cursor: "pointer",
-                  }}
-                >
-                  行かない
-                  <div style={{ position: "absolute", top: 6, right: 10, display: "flex", gap: 4 }}>
-                    {activeVotes.notGo.map((name) => (
-                      <div
-                        key={`no-${name}`}
-                        style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: "50%",
-                          background: "rgba(255,255,255,0.18)",
-                          color: "#fff",
-                          fontSize: 11,
-                          fontWeight: 900,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        {getInitial(name)}
-                      </div>
-                    ))}
-                  </div>
-                </button>
-                <button
-                  onClick={() => handleHold(selectedCardId)}
-                  style={{
-                    flex: 1,
-                    padding: "12px 16px",
-                    borderRadius: 16,
-                    border: "1px solid #facc15",
-                    background: "rgba(253,230,138,0.25)",
-                    color: "#92400e",
-                    fontWeight: 900,
-                    cursor: "pointer",
-                  }}
-                >
-                  保留して閉じる
-                </button>
+                投票を送信しました。他の参加者の投票完了を待っています…（
+                {readyCount}/{totalParticipants}）
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          );
+        })()}
     </div>
   );
 }
