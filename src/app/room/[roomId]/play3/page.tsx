@@ -2309,11 +2309,11 @@ return (
         <button
           disabled={vsSorted.length > 0 || uiLocked}
           onClick={async () => {
-            if (!roomId || typeof roomId !== "string" || !userName) return;
+            if (!roomId || typeof roomId !== "string" || !myUserId) return;
             await setDoc(
-              doc(db, "rooms", roomId, "play3Ready", userName),
+              doc(db, "rooms", roomId, "play3Ready", myUserId),
               {
-                userId: userName,
+                userId: myUserId,
                 ready: true,
                 updatedAt: serverTimestamp(),
               },
@@ -2348,6 +2348,14 @@ return (
             return acc + (play3Ready[participant.id] ? 1 : 0);
           }, 0);
           
+          console.log('終了待ちカウント:', {
+            displayParticipants: displayParticipants.map(p => ({ id: p.id, name: p.name })),
+            play3Ready,
+            actualParticipantCount,
+            readyCount,
+            myUserId
+          });
+          
           return (
             <div
               style={{
@@ -2373,7 +2381,7 @@ return (
                   color: "#0f172a",
                 }}
               >
-                投票を送信しました。他の参加者の投票完了を待っています…（
+                終了しました。他の参加者の終了を待っています…（
                 {readyCount}/{actualParticipantCount}）
               </div>
             </div>
