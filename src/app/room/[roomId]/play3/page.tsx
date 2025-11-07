@@ -968,7 +968,8 @@ return (
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: false,
+              hasBlackBorder: false, // 満場一致は黒枠なし
+              voteCompleted: true, // 投票完了フラグで再投票を防ぐ
             },
             { merge: true }
           );
@@ -981,7 +982,8 @@ return (
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: false,
+              hasBlackBorder: false, // 満場一致は黒枠なし
+              voteCompleted: true, // 投票完了フラグで再投票を防ぐ
             },
             { merge: true }
           );
@@ -995,6 +997,7 @@ return (
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
               hasBlackBorder: true,
+              voteCompleted: true, // 投票完了フラグ
             },
             { merge: true }
           );
@@ -1008,6 +1011,7 @@ return (
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
               hasBlackBorder: true,
+              voteCompleted: true, // 投票完了フラグ
             },
             { merge: true }
           );
@@ -1067,15 +1071,46 @@ return (
 
     const cid = targetCardId || cardModal?.id;
     if (!cid) return;
+    
+    // 投票完了チェック（play3Assignmentsから確認）
+    try {
+      const assignmentSnap = await getDoc(doc(db, "rooms", roomId, "play3Assignments", cid));
+      if (assignmentSnap.exists()) {
+        const assignmentData: any = assignmentSnap.data();
+        if (assignmentData.voteCompleted) {
+          const status = assignmentData.status;
+          if (status === "go") {
+            alert("このカードは投票完了済みです。\n全員一致で「行く」に決定しました！");
+          } else if (status === "no") {
+            alert("このカードは投票完了済みです。\n全員一致で「行かない」に決定しました！");
+          } else {
+            alert("このカードは投票完了済みです。\n意見が分かれたため、後で議論が必要です。");
+          }
+          return;
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to check vote completion", error);
+    }
+    
     const sessionId = `${cid}-${Date.now()}`;
     const cardRef = doc(db, "rooms", roomId, PLAY3_VOTE_COLLECTION, cid);
     let nextRound = 1;
     let history: Record<string, Record<string, string>> = {};
+    const MAX_ROUNDS = 3; // 最大投票ラウンド数
+    
     try {
       const snap = await getDoc(cardRef);
       if (snap.exists()) {
         const data: any = snap.data();
         const prevRound = typeof data.currentRound === "number" ? data.currentRound : 0;
+        
+        // 最大ラウンド数チェック
+        if (prevRound >= MAX_ROUNDS) {
+          alert(`このカードは既に${MAX_ROUNDS}回投票が行われました。\nこれ以上の投票はできません。後で議論が必要です。`);
+          return;
+        }
+        
         const prevVotes: Record<string, string> = (data?.votes || {}) as any;
         const prevHistory: Record<string, Record<string, string>> =
           (data?.history as Record<string, Record<string, string>>) || {};
@@ -2121,27 +2156,63 @@ return (
                               </div>
                             )}
 
-                            <div style={{ position: "relative" }}>
-                              <button
-                                aria-pressed={votedNo}
-                                disabled={hasVoted && !votedNo}
-                                onClick={() => {
-                                  console.log('No button clicked:', { 
-                                    hasVoted, 
-                                    activeVote: activeVote?.modalOpen, 
-                                    cardId: activeVote?.cardId, 
-                                    modalCardId: cardModal.id 
-                                  });
-                                  if (!hasVoted) {
-                                    if (activeVote?.modalOpen && activeVote.cardId === cardModal.id) {
-                                      castVote("no");
-                                    } else {
-                                      startVote("no", cardModal.id);
+                            {/* 投票完了カード（黒枠 or 満場一致）は完了メッセージを表示 */}
+                            {(() => {
+                              // カードのステータスを確認
+                              const isGo = goIds.includes(cardModal.id);
+                              const isNo = noIds.includes(cardModal.id);
+                              const isVs = vsIds.includes(cardModal.id);
+                              const hasBlackBorder = blackBorderIds.has(cardModal.id);
+                              
+                              // 黒枠がついているVSカード、または決定済みのgo/noカードを投票不可とする
+                              // TODO: voteCompletedフラグも確認できるようにする
+                              const isVoteCompleted = hasBlackBorder && isVs;
+                              
+                              if (isVoteCompleted) {
+                                return (
+                                  <div
+                                    style={{
+                                      padding: "16px 24px",
+                                      borderRadius: 12,
+                                      background: "#fef3c7",
+                                      border: "2px solid #f59e0b",
+                                      color: "#92400e",
+                                      fontWeight: 800,
+                                      textAlign: "center",
+                                      fontSize: 14,
+                                      whiteSpace: "pre-line",
+                                    }}
+                                  >
+                                    このカードは投票完了済みです<br />
+                                    意見が分かれたため、後で議論が必要です
+                                  </div>
+                                );
+                              }
+                              
+                              // 投票ボタンを表示
+                              return (
+                              <>
+                                <div style={{ position: "relative" }}>
+                                <button
+                                  aria-pressed={votedNo}
+                                  disabled={hasVoted && !votedNo}
+                                  onClick={() => {
+                                    console.log('No button clicked:', { 
+                                      hasVoted, 
+                                      activeVote: activeVote?.modalOpen, 
+                                      cardId: activeVote?.cardId, 
+                                      modalCardId: cardModal.id 
+                                    });
+                                    if (!hasVoted) {
+                                      if (activeVote?.modalOpen && activeVote.cardId === cardModal.id) {
+                                        castVote("no");
+                                      } else {
+                                        startVote("no", cardModal.id);
+                                      }
                                     }
-                                  }
-                                }}
-                                style={noStyle}
-                              >
+                                  }}
+                                  style={noStyle}
+                                >
                                 行かない
                               </button>
                               <div
@@ -2231,6 +2302,9 @@ return (
                                 {renderVoteAvatars("go")}
                               </div>
                             </div>
+                              </>
+                              );
+                            })()}
                           </>
                         );
                       })()}
