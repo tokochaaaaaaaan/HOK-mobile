@@ -63,9 +63,17 @@
   font-size: 1.5rem;
   margin-bottom: 1rem;
 }
+
+/* カードと回転インジケーターのコンテナ */
+.cardContainer {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
 .largeCard {
   width: fit-content;
-  margin: 0 auto 0.5rem;
   cursor: pointer;
 }
 .largeCard img {
@@ -73,7 +81,46 @@
   height: auto;
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  transition: transform 0.3s ease;
 }
+
+.largeCard:hover img {
+  transform: scale(1.02);
+}
+
+/* 回転インジケーター（アニメーションなし） */
+.flipIndicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding: 1rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #e0f2fe, #dbeafe);
+  border: 2px solid #3b82f6;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+}
+
+.flipIndicator:hover {
+  background: linear-gradient(135deg, #bfdbfe, #93c5fd);
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.flipIcon {
+  color: #2563eb;
+  /* アニメーションは削除 */
+}
+
+.flipText {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1e40af;
+  white-space: nowrap;
+}
+
 .polaritySection {
   margin-top: 1.5rem;
 }
@@ -284,4 +331,90 @@
   height: auto;
 }
 
+/* 横スクロール可能なカード一覧 */
+.cardScrollContainer {
+  width: 100%;
+  padding: 1rem 0;
+  margin-top: 1rem;
+  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.cardScrollWrapper {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cardScrollWrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.cardScrollWrapper::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.cardScrollWrapper::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.cardScrollWrapper::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.scrollCard {
+  flex: 0 0 auto;
+  width: 180px;
+  background: #fff;
+  border: 3px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.scrollCard:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  border-color: #3b82f6;
+}
+
+.scrollCardSelected {
+  border-color: #2563eb;
+  border-width: 4px;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.3);
+  transform: scale(1.05);
+}
+
+.scrollCard img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  background: #f8fafc;
+}
+
+.scrollCardTitle {
+  padding: 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #1f2937;
+  text-align: center;
+  line-height: 1.3;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scrollCardSelected .scrollCardTitle {
+  color: #2563eb;
+}
 

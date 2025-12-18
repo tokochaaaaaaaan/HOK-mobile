@@ -115,22 +115,44 @@ export default function RoomPage() {
   const participantCount = Object.keys(roomData.participants || {}).length;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        top: "50%",
-        left: "50%",
-        transform: "translate(-50%, -50%)",
-        backgroundColor: "#fff",
-        padding: "32px",
-        borderRadius: "12px",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-        width: "360px",
-        textAlign: "center",
-        fontFamily: "Arial, sans-serif",
-      }}
-    >
-      <h2 style={{ marginBottom: "8px" }}>ユーザ名: {userName}</h2>
+    <>
+      {/* 全画面左上の戻るボタン */}
+      <button
+        onClick={() => router.push('/')}
+        style={{
+          position: "fixed",
+          top: "16px",
+          left: "16px",
+          padding: "8px 16px",
+          backgroundColor: "#6c757d",
+          color: "#fff",
+          border: "none",
+          borderRadius: "6px",
+          cursor: "pointer",
+          fontSize: "0.9rem",
+          zIndex: 1000,
+          boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+        }}
+      >
+        ← トップへ戻る
+      </button>
+
+      <div
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          backgroundColor: "#fff",
+          padding: "32px",
+          borderRadius: "12px",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+          width: "360px",
+          textAlign: "center",
+          fontFamily: "Arial, sans-serif",
+        }}
+      >
+        <h2 style={{ marginBottom: "8px" }}>ユーザ名: {userName}</h2>
       <h3 style={{ marginBottom: "16px", color: "#555" }}>ルームID: {roomId}</h3>
 
       <div style={{ textAlign: "left", marginBottom: "24px" }}>
@@ -224,6 +246,7 @@ export default function RoomPage() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }

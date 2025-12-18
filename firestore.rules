@@ -1,57 +1,22 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isSignedIn() { return request.auth != null; }
-    function isHost(roomId) {
-      return get(/databases/$(database)/documents/rooms/$(roomId)/meta/host).data.hostId == request.auth.uid;
-    }
-
-    // rooms コレクション: 基本閲覧は参加ユーザーのみ
+    // 認証チェックを削除し、基本的に誰でもアクセス可能に
+    // （プロダクション環境では適切な認証を追加することを推奨）
+    
+    // rooms コレクション: 誰でも読み書き可能
     match /rooms/{roomId} {
-      allow read: if isSignedIn();
-      allow write: if false; // ルート直下書き込み禁止
+      allow read, write: if true;
 
-      // finalSelections: 各ユーザーは自分のドキュメントのみ書き込み
-      match /finalSelections/{userId} {
-        allow read: if isSignedIn();
-        allow create, update, delete: if isSignedIn() && request.auth.uid == userId;
-      }
-
-      // goNo: ホストのみ更新（提案確定フェーズ想定）
-      match /goNo/{cardId} {
-        allow read: if isSignedIn();
-        allow create, update, delete: if isSignedIn() && isHost(roomId);
-      }
-
-      // meta 下位: 一部ドキュメント（discussionStatus 等）は参加者全員が更新可
-      match /meta/{docId} {
-        allow read: if isSignedIn();
-        allow write: if isSignedIn();
-      }
-
-      // votes / proposals 導入想定: 参加者作成, ホスト確定
-      match /votes/{cardId} {
-        allow read: if isSignedIn();
-        allow create, update: if isSignedIn();
-        allow delete: if false; // 履歴保全
-      }
-      match /proposals/{cardId} {
-        allow read: if isSignedIn();
-        allow create: if isSignedIn() && isHost(roomId);
-        allow update: if isSignedIn() && (isHost(roomId));
-        allow delete: if false;
-      }
-
-      // presence (if stored in Firestore)
-      match /presence/{userId} {
-        allow read: if isSignedIn();
-        allow write: if isSignedIn() && request.auth.uid == userId;
+      // すべてのサブコレクションも誰でもアクセス可能
+      match /{document=**} {
+        allow read, write: if true;
       }
     }
 
-    // デフォルト deny
+    // デフォルト allow（開発用）
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if true;
     }
   }
 }

@@ -156,37 +156,63 @@ export default function MatchResultPage() {
           docId: doc.id, 
           data,
           hasCategories: !!data.categories,
+          isReady: !!data.isReady,
           hasWant: !!data.want,
           hasDont: !!data.dont
         });
         
+        // waitingページで確定したデータのみを使用
+        if (!data.isReady) {
+          console.log('Match result: Skipping non-ready user:', doc.id);
+          return;
+        }
+        
         try {
-          // Handle both new and old data formats
+          // 統一フォーマット優先: categories フィールドを使用
           if (data.categories) {
-            // 新形式: categories フィールドを使用
             list.push({
               user: data.user || data.userId || data.userName || doc.id,
               userId: data.userId || data.user || data.userName || doc.id,
               userName: data.userName || data.user || data.userId || doc.id,
-              planName: data.planName || "",
+              planName: data.planName || data.planname || "",
               categories: data.categories,
             });
-          } else {
-            // 旧形式: want/dont フィールドからcategoriesを構築
+          } else if (data.verywant || data.verydont || data.want || data.dont) {
+            // 旧形式: verywant/verydont/want/dont フィールドから構築
             const categories = {
-              veryWant: [],
+              veryWant: (data.verywant || []).map((item: any) => 
+                typeof item === 'string' ? { id: item } : item
+              ),
               want: (data.want || []).map((id: string) => ({ id })),
-              neutral: [],
+              neutral: (data.neutral || []).map((id: string) => ({ id })),
               dont: (data.dont || []).map((id: string) => ({ id })),
-              veryDont: [],
+              veryDont: (data.verydont || []).map((item: any) => 
+                typeof item === 'string' ? { id: item } : item
+              ),
             };
             
             list.push({
               user: data.user || data.userId || doc.id,
               userId: data.userId || data.user || doc.id,
               userName: data.userName || data.user || doc.id,
-              planName: data.planName || "",
+              planName: data.planName || data.planname || "",
               categories,
+            });
+          } else {
+            // データ不足の場合は空のカテゴリで追加
+            console.warn('Match result: No valid category data found for user:', doc.id);
+            list.push({
+              user: data.user || data.userId || doc.id,
+              userId: data.userId || data.user || doc.id,
+              userName: data.userName || data.user || doc.id,
+              planName: data.planName || data.planname || "",
+              categories: {
+                veryWant: [],
+                want: [],
+                neutral: [],
+                dont: [],
+                veryDont: [],
+              },
             });
           }
         } catch (error) {
@@ -290,7 +316,7 @@ export default function MatchResultPage() {
       const agreement = agreementOverall(matrix);
       console.log('Match result: Overall agreement calculation successful:', agreement);
       
-      setOverallAgreement(Math.round(agreement)); // 整数に丸める
+      setOverallAgreement(agreement); // agreementOverall内で既にMath.roundされている
       setAgreementReady(true);
     } catch (error) {
       console.error('Match result: Error calculating agreement:', error);
@@ -502,6 +528,29 @@ export default function MatchResultPage() {
                   {overallAgreement >= 60 && overallAgreement < 80 && '良い合致率ですね！'}
                   {overallAgreement < 60 && '意見が分かれていますね'}
                 </div>
+                {/* 参加者とプラン名の表示 */}
+                {userSelections.length > 0 && (
+                  <div style={{ 
+                    marginTop: 16, 
+                    padding: "12px 16px", 
+                    backgroundColor: "rgba(255,255,255,0.15)", 
+                    borderRadius: 12,
+                    fontSize: "0.9rem",
+                    lineHeight: 1.6
+                  }}>
+                    <div style={{ fontWeight: 700, marginBottom: 8, fontSize: "1rem" }}>参加者</div>
+                    {userSelections.map((selection, idx) => (
+                      <div key={idx} style={{ marginBottom: 4 }}>
+                        <span style={{ fontWeight: 600 }}>{selection.userName || selection.userId}</span>
+                        {selection.planName && (
+                          <span style={{ opacity: 0.9, marginLeft: 8 }}>
+                            プラン: {selection.planName}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div style={{ fontSize: '12px', opacity: 0.8, marginTop: 6 }}>まもなく詳細分析画面に移動します...</div>
               </div>
             </div>

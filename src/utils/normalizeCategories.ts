@@ -6,22 +6,22 @@
 export type BasicCard = { id: string; title?: string; src?: string; backSrc?: string; reason?: string };
 
 export type RawCategories = {
-  verywant?: BasicCard[]; // 保存時の小文字形式
+  verywant?: BasicCard[]; // 旧保存形式の小文字
   want?: BasicCard[];
   neutral?: BasicCard[];
   dont?: BasicCard[];
   verydont?: BasicCard[];
-  // 大文字キャメルで来る可能性も保険的に受ける
+  // 統一フォーマットのキャメルケース
   veryWant?: BasicCard[];
   veryDont?: BasicCard[];
 };
 
 export interface NormalizedCategories {
-  verywant: BasicCard[]; // 保存互換用
+  veryWant: BasicCard[]; // 統一フォーマット（キャメルケース）
   want: BasicCard[];
   neutral: BasicCard[];
   dont: BasicCard[];
-  verydont: BasicCard[];
+  veryDont: BasicCard[];
 }
 
 function uniqueById(list: BasicCard[] | undefined): BasicCard[] {
@@ -64,7 +64,7 @@ export function normalizeCategories(raw: RawCategories): NormalizedCategories {
   ]);
   n = n.filter(c => !occupied.has(c.id));
 
-  return { verywant: vw, want: w, neutral: n, dont: d, verydont: vd };
+  return { veryWant: vw, want: w, neutral: n, dont: d, veryDont: vd };
 }
 
 export function normalizeFinalSelectionDoc(data: any): any {
@@ -74,11 +74,12 @@ export function normalizeFinalSelectionDoc(data: any): any {
     return {
       ...data,
       categories: normalized,
-      verywant: normalized.verywant.map(c => c.id),
-      verydont: normalized.verydont.map(c => c.id),
-      want: normalized.want.map(c => c.id),
-      dont: normalized.dont.map(c => c.id),
-      neutral: normalized.neutral.map(c => c.id),
+      // 実験データ用に旧形式も保存
+      verywant: normalized.veryWant.map((c: BasicCard) => c.id),
+      verydont: normalized.veryDont.map((c: BasicCard) => c.id),
+      want: normalized.want.map((c: BasicCard) => c.id),
+      dont: normalized.dont.map((c: BasicCard) => c.id),
+      neutral: normalized.neutral.map((c: BasicCard) => c.id),
     };
   }
   const raw: RawCategories = {

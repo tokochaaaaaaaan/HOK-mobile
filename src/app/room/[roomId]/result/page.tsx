@@ -6,13 +6,58 @@ import { collection, doc, onSnapshot, query } from 'firebase/firestore';
 import { agreementOverall, convertSelectionsToMatrix } from '../../../../utils/agreement-calculator';
 import { db } from '../../../../../lib/firebase';
 import { normalizeCategories } from '../../../../utils/normalizeCategories';
+import MapButton from '@/components/MapButton';
+
+// カード名定義
+const cardTitles = [
+  "ジョーズ",
+  "アミティ・ボードウォーク・ゲーム",
+  "ウォーターワールド",
+  "ザ・ドラゴン・パール",
+  "ロンバーズ・ランディング",
+  "ロストワールド・レストラン",
+  "ジュラシック・パーク・ダイナソー・ミート&グリート",
+  "ザ・フライング・ダイナソー",
+  "名探偵コナン 4-D ライブ・ショー ~星空の宝石(ジュエル)~",
+  "クロミ・ライブ",
+  "パークサイド・グリル",
+  "SAIDO",
+  "デリシャス・ミー！ザ・クッキー・キッチン",
+  "スペース・キラー",
+  "ミニオン・ハチャメチャ・アイス",
+  "ミニオン・ハチャメチャ・ライド",
+  "マリオカート ~クッパの挑戦状~",
+  "ヨッシー・アドベンチャー",
+  "キノピオカフェ",
+  "ピットストップ・ポップコーン",
+  "三本の箒",
+  "オリバンダーの店",
+  "ハリー・ポッター・アンド・ザ・フォービドゥン・ジャーニー",
+  "フライト・オブ・ザ・ヒッポグリフ",
+  "ハリウッド・ドリーム・ザ・ライド",
+  "プレイング・ウィズおさるのジョージ",
+  "シング・オン・ツアー",
+  "スタジオ・スターズ・レストラン",
+  "ビバリーヒルズ・ブランジェリー",
+  "鬼滅の刃 XRライド ~刀鍛冶の里を疾走せよ~",
+  "ハローキティのコーナーカフェ",
+  "スヌーピー・バックロット・カフェ",
+  "ハローキティのリボン・コレクション",
+  "エルモのゴーゴー・スケートボード",
+  "エルモのバブル・バブル",
+  "エルモのリトル・ドライブ",
+  "ハローキティのカップケーキ・ドリーム",
+  "ビッグバードのビッグトップ・サーカス",
+  "フライング・スヌーピー",
+  "モッピーのバルーン・トリップ",
+];
 
 // カード定義（play3 と揃える）
 const allCards = Array.from({ length: 40 }, (_, i) => {
   const idx = i + 1;
   return {
     id: `card${idx}`,
-    title: `カード${idx}`,
+    title: cardTitles[i],
     src: `/pngs/USJ_${idx}_surface-1.png`,
   };
 });
@@ -83,11 +128,11 @@ export default function ResultPage() {
            userName: data.userName || data.userId || d.id,
            planName: data.planName || 'プラン名未設定',
            categories: {
-             veryWant: (norm.verywant || []).map((c: any) => ({ id: c.id, reason: c.reason })),
+             veryWant: (norm.veryWant || []).map((c: any) => ({ id: c.id, reason: c.reason })),
              want: (norm.want || []).map((c: any) => ({ id: c.id })),
              neutral: (norm.neutral || []).map((c: any) => ({ id: c.id })),
              dont: (norm.dont || []).map((c: any) => ({ id: c.id })),
-             veryDont: (norm.verydont || []).map((c: any) => ({ id: c.id, reason: c.reason })),
+             veryDont: (norm.veryDont || []).map((c: any) => ({ id: c.id, reason: c.reason })),
            }
          });
       });
@@ -221,8 +266,8 @@ export default function ResultPage() {
     neutral: { bg: '#e5e7eb', text: '#374151', border: '#d1d5db' },
     dont: { bg: '#bae6fd', text: '#0c4a6e', border: '#93c5fd' },
     veryDont: { bg: '#93c5fd', text: '#1e3a8a', border: '#60a5fa' },
-    go: { bg: '#dc2626', text: '#fff', border: '#b91c1c' },      // 濃い赤
-    no: { bg: '#1e3a8a', text: '#fff', border: '#1e40af' },      // 濃い青
+    go: { bg: '#fecaca', text: '#991b1b', border: '#fca5a5' },      // 柔らかい赤
+    no: { bg: '#dbeafe', text: '#1e40af', border: '#93c5fd' },      // 柔らかい青
     unassigned: { bg: '#f3f4f6', text: '#6b7280', border: '#d1d5db' },
   };
 
@@ -307,46 +352,46 @@ export default function ResultPage() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-          {/* 行く（濃い赤） */}
-          <div style={{ border: '2px solid #b91c1c', background: '#dc2626', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(220,38,38,0.4)' }}>
+          {/* 行く（柔らかい赤） */}
+          <div style={{ border: '2px solid #fca5a5', background: '#fee2e2', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(252,165,165,0.5)' }}>
             <div
               onClick={() => setExpanded(e => ({ ...e, go: !expanded.go }))}
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ fontWeight: 900, fontSize: 18, color: '#fff' }}>行く</div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#fecaca', opacity: .9 }}>{uniqueSectionCards.go?.length || 0}枚</div>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#991b1b' }}>行く</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', opacity: .9 }}>{uniqueSectionCards.go?.length || 0}枚</div>
               </div>
-              <div style={{ transform: expanded.go ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#fff' }}>^</div>
+              <div style={{ transform: expanded.go ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#991b1b' }}>^</div>
             </div>
-            <div style={{ height: expanded.go ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.go ? '1px solid rgba(255,255,255,0.3)' : 'none', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ height: expanded.go ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.go ? '1px solid rgba(252,165,165,0.4)' : 'none', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '10px 14px 20px' }}>
                 <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
                   {(uniqueSectionCards.go?.length || 0) > 0 ? uniqueSectionCards.go!.map(renderCard) : (
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#fecaca' }}>カードなし</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#dc2626' }}>カードなし</div>
                   )}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* 行かない（濃い青） */}
-          <div style={{ border: '2px solid #1e40af', background: '#1e3a8a', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(30,58,138,0.4)' }}>
+          {/* 行かない（柔らかい青） */}
+          <div style={{ border: '2px solid #93c5fd', background: '#eff6ff', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(147,197,253,0.5)' }}>
             <div
               onClick={() => setExpanded(e => ({ ...e, no: !expanded.no }))}
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ fontWeight: 900, fontSize: 18, color: '#fff' }}>行かない</div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#bfdbfe', opacity: .9 }}>{uniqueSectionCards.no?.length || 0}枚</div>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#1e40af' }}>行かない</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#3b82f6', opacity: .9 }}>{uniqueSectionCards.no?.length || 0}枚</div>
               </div>
-              <div style={{ transform: expanded.no ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#fff' }}>^</div>
+              <div style={{ transform: expanded.no ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#1e40af' }}>^</div>
             </div>
-            <div style={{ height: expanded.no ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.no ? '1px solid rgba(255,255,255,0.3)' : 'none', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ height: expanded.no ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.no ? '1px solid rgba(147,197,253,0.4)' : 'none', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '10px 14px 20px' }}>
                 <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
                   {(uniqueSectionCards.no?.length || 0) > 0 ? uniqueSectionCards.no!.map(renderCard) : (
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#bfdbfe' }}>カードなし</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#3b82f6' }}>カードなし</div>
                   )}
                 </div>
               </div>
@@ -641,6 +686,8 @@ export default function ResultPage() {
           </div>
         );
       })()}
+
+      <MapButton />
     </div>
   );
 }

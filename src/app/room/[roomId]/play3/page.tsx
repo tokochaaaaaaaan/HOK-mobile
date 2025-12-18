@@ -12,6 +12,8 @@ import {
   setDoc,
   getDoc,
   serverTimestamp,
+  runTransaction,
+  updateDoc,
 } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
 import { listenToPresence } from "../../../../../lib/firebase-utils-safe";
@@ -21,18 +23,25 @@ import {
   convertSelectionsToMatrix,
 } from "../../../../utils/agreement-calculator";
 import { normalizeCategories } from "../../../../utils/normalizeCategories";
+import MapButton from "@/components/MapButton";
+import styles from "./page.module.css";
 
-const PLAY3_VOTE_COLLECTION = "play3Votes";
+const PLAY3_VOTE_SESSIONS = "play3VoteSessions";
+const PLAY3_VOTE_RESULTS = "play3VoteResults";
 
 type VoteChoice = "go" | "no" | "pending";
+type VotePhase = "idle" | "voting" | "finalizing" | "finished";
 type ActiveVoteState = {
-  cardId: string;
-  sessionId: string;
-  modalOpen: boolean;
-  initiatedById?: string;
-  initiatedByName?: string;
+  phase: VotePhase;
+  cardId: string | null;
+  sessionId: string | null;
   round: number;
-  expectedUserIds?: string[];
+  expectedUserIds: string[];
+  createdAt: number;
+  startedBy?: string;
+  finalizedAt?: number;
+  finalizedBy?: string;
+  resultRef?: string;
 };
 
 export default function Play3Page() {
@@ -48,6 +57,49 @@ export default function Play3Page() {
   );
   usePreventBack();
 
+  // ページ離脱防止の強化（リロード・タブを閉じる時に警告）
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = ''; // Chrome requires returnValue to be set
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
+
+  // Next.jsルーター遷移のブロック（別ページへの遷移を防ぐ）
+  useEffect(() => {
+    const currentPath = window.location.pathname;
+    
+    // popstateイベントで戻る/進むをブロック
+    const handlePopState = (e: PopStateEvent) => {
+      e.preventDefault();
+      // 強制的に現在のページに戻す
+      window.history.pushState(null, '', currentPath);
+    };
+
+    // hashchangeイベントもブロック
+    const handleHashChange = (e: HashChangeEvent) => {
+      e.preventDefault();
+      window.location.hash = '';
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('hashchange', handleHashChange);
+
+    // 初期状態を履歴に追加
+    window.history.pushState(null, '', currentPath);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handleHashChange);
+    };
+  }, []);
+
   // 画面が狭い場合に全体を少し縮小して表示
   const [scale, setScale] = useState(1);
   useEffect(() => {
@@ -61,13 +113,56 @@ export default function Play3Page() {
   }, []);
 
   // カード定義（40枚）
+  const cardTitles = [
+    "ジョーズ",
+    "アミティ・ボードウォーク・ゲーム",
+    "ウォーターワールド",
+    "ザ・ドラゴン・パール",
+    "ロンバーズ・ランディング",
+    "ロストワールド・レストラン",
+    "ジュラシック・パーク・ダイナソー・ミート&グリート",
+    "ザ・フライング・ダイナソー",
+    "名探偵コナン 4-D ライブ・ショー ~星空の宝石(ジュエル)~",
+    "クロミ・ライブ",
+    "パークサイド・グリル",
+    "SAIDO",
+    "デリシャス・ミー！ザ・クッキー・キッチン",
+    "スペース・キラー",
+    "ミニオン・ハチャメチャ・アイス",
+    "ミニオン・ハチャメチャ・ライド",
+    "マリオカート ~クッパの挑戦状~",
+    "ヨッシー・アドベンチャー",
+    "キノピオカフェ",
+    "ピットストップ・ポップコーン",
+    "三本の箒",
+    "オリバンダーの店",
+    "ハリー・ポッター・アンド・ザ・フォービドゥン・ジャーニー",
+    "フライト・オブ・ザ・ヒッポグリフ",
+    "ハリウッド・ドリーム・ザ・ライド",
+    "プレイング・ウィズおさるのジョージ",
+    "シング・オン・ツアー",
+    "スタジオ・スターズ・レストラン",
+    "ビバリーヒルズ・ブランジェリー",
+    "鬼滅の刃 XRライド ~刀鍛冶の里を疾走せよ~",
+    "ハローキティのコーナーカフェ",
+    "スヌーピー・バックロット・カフェ",
+    "ハローキティのリボン・コレクション",
+    "エルモのゴーゴー・スケートボード",
+    "エルモのバブル・バブル",
+    "エルモのリトル・ドライブ",
+    "ハローキティのカップケーキ・ドリーム",
+    "ビッグバードのビッグトップ・サーカス",
+    "フライング・スヌーピー",
+    "モッピーのバルーン・トリップ",
+  ];
+
   const ALL_CARDS = useMemo(
     () =>
       Array.from({ length: 40 }, (_, i) => {
         const idx = i + 1;
         return {
           id: `card${idx}`,
-          title: `カード${idx}`,
+          title: cardTitles[i],
           src: `/pngs/USJ_${idx}_surface-1.png`,
           backSrc: `/pngs/back/USJ_${idx}_back-1.png`,
         };
@@ -109,7 +204,7 @@ export default function Play3Page() {
   const [assignLoaded, setAssignLoaded] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
-  // 参加者（右上アバター用）
+  // 参加者情報モーダル用
   const [activeUserInfo, setActiveUserInfo] = useState<string | null>(null);
   const [userInfoExpanded, setUserInfoExpanded] = useState<
     Record<string, boolean>
@@ -420,11 +515,10 @@ export default function Play3Page() {
 
   const initiatorDisplayName = useMemo(() => {
     if (!activeVote) return "";
-    if (activeVote.initiatedById) {
-      const found = participantMap.get(activeVote.initiatedById);
+    if (activeVote.startedBy) {
+      const found = participantMap.get(activeVote.startedBy);
       if (found?.name) return found.name;
     }
-    if (activeVote.initiatedByName) return activeVote.initiatedByName;
     return "";
   }, [activeVote, participantMap]);
 
@@ -497,18 +591,26 @@ export default function Play3Page() {
     return nodes;
   };
 
-  // 移行（結果へ）準備状況
+  // 移行（結果へ）準備状況 - play3Result コレクション
   const [play3Ready, setPlay3Ready] = useState<Record<string, boolean>>({});
   useEffect(() => {
     if (!roomId || typeof roomId !== "string") return;
-    const qReady = query(collection(db, "rooms", roomId, "play3Ready"));
-    const unsub = onSnapshot(qReady, (snap) => {
+    const qResult = query(collection(db, "rooms", roomId, "play3Result"));
+    const unsub = onSnapshot(qResult, (snap) => {
       const map: Record<string, boolean> = {};
       snap.docs.forEach((d) => {
         const data: any = d.data();
-        if (data?.ready) map[data.userId || d.id] = true;
+        // trueの判定があれば準備完了とする
+        if (data?.ready === true || data?.completed === true) {
+          map[d.id] = true;
+        }
       });
       setPlay3Ready(map);
+      
+      console.log('play3Result購読:', {
+        docs: snap.docs.map(d => ({ id: d.id, data: d.data() })),
+        resultMap: map
+      });
     });
     return () => unsub();
   }, [roomId]);
@@ -520,13 +622,23 @@ export default function Play3Page() {
       return acc + (play3Ready[participant.id] ? 1 : 0);
     }, 0);
 
+    console.log("[Play3 Navigation Check]", {
+      actualParticipantCount,
+      readyCount,
+      vsIdsLength: vsIds.length,
+      displayParticipants: displayParticipants.map(p => ({ id: p.id, name: p.name })),
+      play3Ready,
+      willNavigate: actualParticipantCount > 0 && readyCount === actualParticipantCount && vsIds.length === 0
+    });
+
     if (actualParticipantCount > 0 && readyCount === actualParticipantCount && vsIds.length === 0) {
+      console.log("[Play3] ✅ Navigating to result page");
       router.push(`/room/${roomId}/result`);
     }
   }, [play3Ready, displayParticipants, vsIds.length, router, roomId]);
 
 
-  // finalSelections 購読
+  // finalSelections 購読（waitingページで確定したデータのみ使用）
   useEffect(() => {
     if (!roomId || typeof roomId !== "string") return;
     const qSel = query(collection(db, "rooms", roomId, "finalSelections"));
@@ -534,21 +646,54 @@ export default function Play3Page() {
       const list: Selections = [] as any;
       snap.docs.forEach((d) => {
         const data: any = d.data();
-        const norm = normalizeCategories(data.categories || {});
+        
+        // waitingページで確定したデータのみを使用
+        if (!data.isReady) {
+          console.log('Play3: Skipping non-ready user:', d.id);
+          return;
+        }
+        
+        // match-resultと同じロジック: 統一フォーマット優先
+        let categories;
+        if (data.categories) {
+          categories = data.categories;
+        } else if (data.verywant || data.verydont || data.want || data.dont) {
+          // 旧形式から構築
+          categories = {
+            veryWant: (data.verywant || []).map((item: any) => 
+              typeof item === 'string' ? { id: item } : item
+            ),
+            want: (data.want || []).map((id: string) => ({ id })),
+            neutral: (data.neutral || []).map((id: string) => ({ id })),
+            dont: (data.dont || []).map((id: string) => ({ id })),
+            veryDont: (data.verydont || []).map((item: any) => 
+              typeof item === 'string' ? { id: item } : item
+            ),
+          };
+        } else {
+          categories = {
+            veryWant: [],
+            want: [],
+            neutral: [],
+            dont: [],
+            veryDont: [],
+          };
+        }
+        
         list.push({
           user: data.user || data.userId || data.userName || d.id,
           userId: data.userId || data.user || data.userName || d.id,
           userName: data.userName || data.user || data.userId || d.id,
           planName: data.planName || data.planname || "",
           categories: {
-            veryWant: (norm.verywant || []).map((c: any) => ({
+            veryWant: (categories.veryWant || []).map((c: any) => ({
               id: c.id,
               reason: c.reason,
             })),
-            want: (norm.want || []).map((c: any) => ({ id: c.id })),
-            neutral: (norm.neutral || []).map((c: any) => ({ id: c.id })),
-            dont: (norm.dont || []).map((c: any) => ({ id: c.id })),
-            veryDont: (norm.verydont || []).map((c: any) => ({
+            want: (categories.want || []).map((c: any) => ({ id: c.id })),
+            neutral: (categories.neutral || []).map((c: any) => ({ id: c.id })),
+            dont: (categories.dont || []).map((c: any) => ({ id: c.id })),
+            veryDont: (categories.veryDont || []).map((c: any) => ({
               id: c.id,
               reason: c.reason,
             })),
@@ -629,54 +774,65 @@ export default function Play3Page() {
     return () => unsub();
   }, [roomId]);
 
-  // 初期自動配置（一度だけ・play3Assignments が空のとき）
+  // 初期自動配置（selectionsが更新されたら再計算）
   useEffect(() => {
     if (!roomId || typeof roomId !== "string") return;
-    if (!assignLoaded || initialized) return;
+    if (!assignLoaded) return;
     if (!selections.length) return;
-    // snapshot で空（assignLoaded true かつ go/no/vs/neutral 全て空）なら初期化
-    const empty =
-      goIds.length + noIds.length + vsIds.length + neutralIds.length === 0;
-    if (!empty) {
-      setInitialized(true);
-      return;
-    }
 
     const byCard = (id: string) =>
       selections.map((s) => ({
-        pos:
-          s.categories.veryWant.some((c) => c.id === id) ||
-          s.categories.want.some((c) => c.id === id),
-        posStrong: s.categories.veryWant.some((c) => c.id === id),
-        posReason:
-          (s.categories.veryWant.find((c) => c.id === id)?.reason || "").trim()
-            .length > 0,
-        neg:
-          s.categories.dont.some((c) => c.id === id) ||
-          s.categories.veryDont.some((c) => c.id === id),
-        negStrong: s.categories.veryDont.some((c) => c.id === id),
-        negReason:
-          (s.categories.veryDont.find((c) => c.id === id)?.reason || "").trim()
-            .length > 0,
-        neu: s.categories.neutral.some((c) => c.id === id),
+        veryWant: s.categories.veryWant.some((c) => c.id === id),
+        want: s.categories.want.some((c) => c.id === id),
+        neutral: s.categories.neutral.some((c) => c.id === id),
+        dont: s.categories.dont.some((c) => c.id === id),
+        veryDont: s.categories.veryDont.some((c) => c.id === id),
       }));
 
     const initWrites = async () => {
+      console.log('[Play3] カード振り分け開始:', { 
+        selectionsCount: selections.length,
+        allCardsCount: ALL_CARDS.length 
+      });
+      
       for (const card of ALL_CARDS) {
         const arr = byCard(card.id);
-        const pos = arr.some((a) => a.pos);
-        const neg = arr.some((a) => a.neg);
-        const allNeutral = arr.length > 0 && arr.every((a) => a.neu);
-        const hasNeutral = arr.some((a) => a.neu);
-        const hasReason = arr.some((a) => a.posReason || a.negReason);
+        
+        // 各カテゴリに該当する人がいるかチェック
+        const hasPositive = arr.some((a) => a.veryWant || a.want);
+        const hasNegative = arr.some((a) => a.veryDont || a.dont);
+        const allNeutral = arr.length > 0 && arr.every((a) => a.neutral);
+        
         let status: "go" | "no" | "vs" | "neutral" = "neutral";
-        if (pos && !neg && !allNeutral) status = "go";
-        else if (neg && !pos && !allNeutral) status = "no";
-        else if (pos && neg) status = "vs";
-        else if (allNeutral) status = "neutral";
-        else if ((pos && hasNeutral) || (neg && hasNeutral))
-          status = hasReason ? "vs" : "vs";
-        else status = "neutral";
+        
+        // ルール3: 誰かが「行きたい」系 AND 誰かが「行きたくない」系 → 議論中(VS)
+        if (hasPositive && hasNegative) {
+          status = "vs";
+        }
+        // ルール2: 全員が「どちらでもいい」 → どちらでもいい
+        else if (allNeutral) {
+          status = "neutral";
+        }
+        // ルール1: 誰かが「行きたくない」系で、他は「どちらでもいい」か「行きたくない」系のみ → 行かない
+        else if (hasNegative && !hasPositive) {
+          status = "no";
+        }
+        // それ以外で誰かが「行きたい」系がいる → 行く
+        else if (hasPositive && !hasNegative) {
+          status = "go";
+        }
+        // 上記いずれにも該当しない（空データなど） → どちらでもいい
+        else {
+          status = "neutral";
+        }
+        
+        console.log(`[Play3] ${card.title} -> ${status}`, {
+          hasPositive,
+          hasNegative,
+          allNeutral,
+          details: arr
+        });
+        
         await setDoc(
           doc(db, "rooms", roomId, "play3Assignments", card.id),
           {
@@ -688,19 +844,15 @@ export default function Play3Page() {
           { merge: true }
         );
       }
+      console.log('[Play3] カード振り分け完了');
       setInitialized(true);
     };
     initWrites();
   }, [
     assignLoaded,
-    initialized,
     selections,
     roomId,
     userName,
-    goIds.length,
-    noIds.length,
-    vsIds.length,
-    neutralIds.length,
   ]);
 
   // 並び順: 合致率 降順
@@ -709,6 +861,27 @@ export default function Play3Page() {
       return [...ids].sort(
         (a, b) => (agreementMap.get(b) || 0) - (agreementMap.get(a) || 0)
       );
+    },
+    [agreementMap]
+  );
+
+  // VS用ソート: 合致率が低い順 → 同率ならカード番号順
+  const sortVsByAgreementAndNumber = useCallback(
+    (ids: string[]) => {
+      return [...ids].sort((a, b) => {
+        const agreeA = agreementMap.get(a) || 0;
+        const agreeB = agreementMap.get(b) || 0;
+        
+        // 合致率が低い順（昇順）
+        if (agreeA !== agreeB) {
+          return agreeA - agreeB;
+        }
+        
+        // 合致率が同じ場合はカード番号順
+        const numA = parseInt(a.replace('card', ''), 10);
+        const numB = parseInt(b.replace('card', ''), 10);
+        return numA - numB;
+      });
     },
     [agreementMap]
   );
@@ -728,39 +901,43 @@ export default function Play3Page() {
       return true;
     });
 
-// 全参加者分のアイコンを表示（投票中は投票状況を反映）
-const isVotingActive = activeVote?.modalOpen;
+    // 全参加者分のアイコンを表示（投票中は投票状況を反映）
+    const isVotingActive = activeVote?.phase === "voting" || activeVote?.phase === "finalizing";
 
-return (
-  <div style={{ display: "flex", gap: 8 }}>
-    {actualParticipants.map((p) => {
-      // 投票状況をチェック
-      const hasVoted = isVotingActive ? !!(voteMap[p.id] || (p.id === myUserId && myVoteChoice)) : false;
-      const isUnvoted = isVotingActive && !hasVoted;
+    return (
+      <div style={{ display: "flex", gap: 8 }}>
+        {actualParticipants.map((p) => {
+          // 投票状況をチェック
+          const hasVoted = isVotingActive ? !!(voteMap[p.id] || (p.id === myUserId && myVoteChoice)) : false;
+          const isUnvoted = isVotingActive && !hasVoted;
+          const isMyself = p.id === myUserId; // 自分のアイコンかどうか
 
-      return (
-        <button
-          key={p.id}
-          onClick={() => setActiveUserInfo(p.id)}
-          title={`${p.name} (${p.id}) ${isVotingActive ? (hasVoted ? "投票済み" : "未投票") : ""}`}
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: "50%",
-            border: "1px solid #e5e7eb",
-            background: isUnvoted ? "#4b5563" : "#fff", // 未投票者は黒塗り
-            boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
-            fontWeight: 800,
-            color: isUnvoted ? "#fff" : "#111827", // 未投票者は白文字
-            cursor: "pointer",
-          }}
-        >
-          {p.name?.[0]?.toUpperCase() || "?"}
-        </button>
-      );
-    })}
-  </div>
-);
+          return (
+            <button
+              key={p.id}
+              onClick={() => {
+                console.log('[Play3] Avatar clicked:', { id: p.id, name: p.name });
+                setActiveUserInfo(p.id);
+              }}
+              title={`${p.name} (${p.id}) ${isVotingActive ? (hasVoted ? "投票済み" : "未投票") : ""}`}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                border: isMyself ? "2px solid #ef4444" : "1px solid #e5e7eb", // 自分は赤枠
+                background: isUnvoted ? "#4b5563" : "#fff", // 未投票者は黒塗り
+                boxShadow: isMyself ? "0 0 0 2px rgba(239, 68, 68, 0.2)" : "0 2px 6px rgba(0,0,0,0.08)", // 自分は赤い影
+                fontWeight: 800,
+                color: isUnvoted ? "#fff" : "#111827", // 未投票者は白文字
+                cursor: "pointer",
+              }}
+            >
+              {p.name?.[0]?.toUpperCase() || "?"}
+            </button>
+          );
+        })}
+      </div>
+    );
   };
 
   const getCard = (id: string) => ALL_CARDS.find((c) => c.id === id);
@@ -770,6 +947,10 @@ return (
   const openCard = (id: string) => setCardModal({ id, flipped: false });
   const closeCard = () => setCardModal(null);
   const [uiLocked, setUiLocked] = useState(false);
+  
+  // 投票結果表示モーダル
+  const [voteResultModal, setVoteResultModal] = useState<{ cardId: string; cardName: string; area: string } | null>(null);
+  const [lastVoteResultTimestamp, setLastVoteResultTimestamp] = useState<number>(0);
   const [uiLockReason, setUiLockReason] = useState<null | "vote" | "migrate">(null);
 
   const classify = async (
@@ -792,126 +973,120 @@ return (
     closeCard();
   };
 
-  const CHOICE_TO_CODE: Record<VoteChoice, 0 | 1 | 2> = {
-    go: 1,
-    no: 0,
-    pending: 2,
-  };
-  const CODE_TO_CHOICE: Record<0 | 1 | 2, VoteChoice> = {
-    0: "no",
-    1: "go",
-    2: "pending",
-  };
-  const formatVoteValue = (round: number, choice: VoteChoice) =>
-    `y${round}-${CHOICE_TO_CODE[choice]}`;
-  const parseVoteValue = (value: unknown):
-    | { round: number; choice: VoteChoice }
-    | null => {
-    if (typeof value !== "string") return null;
-    const match = value.match(/^y(\d+)-([0-2])$/);
-    if (!match) return null;
-    const round = Number(match[1]);
-    const code = Number(match[2]) as 0 | 1 | 2;
-    const choice = CODE_TO_CHOICE[code];
-    if (!choice || Number.isNaN(round)) return null;
-    return { round, choice };
-  };
-
   // 状態購読（全員へモーダル同期）
   useEffect(() => {
     if (!roomId || typeof roomId !== "string") return;
     const unsub = onSnapshot(doc(db, "rooms", roomId, "play3State", "state"), (snap) => {
       const data: any = snap.data();
+      console.log('play3State更新を受信:', data);
+      
       if (data) {
+        // 後方互換性: phase ?? modalOpen で phase 判定
+        const inferredPhase: VotePhase = 
+          data.phase || 
+          (data.modalOpen ? "voting" : "idle");
+        
         const next: ActiveVoteState = {
-          cardId: data.cardId || "",
-          sessionId: data.sessionId || "",
-          modalOpen: !!data.modalOpen,
-          initiatedById: data.initiatedById || data.initiatedBy,
-          initiatedByName: data.initiatedByName || data.initiatedBy,
+          phase: inferredPhase,
+          cardId: data.cardId || null,
+          sessionId: data.sessionId || null,
           round: typeof data.round === "number" ? data.round : 0,
           expectedUserIds: Array.isArray(data.expectedUserIds)
             ? (data.expectedUserIds as string[])
-            : undefined,
+            : [],
+          createdAt: data.createdAt || 0,
+          startedBy: data.initiatedById || data.initiatedBy,
+          finalizedAt: data.finalizedAt,
+          finalizedBy: data.finalizedBy,
+          resultRef: data.resultRef,
         };
         setActiveVote(next);
-        if (next.modalOpen && next.cardId) {
-          setCardModal((m) => (m?.id === next.cardId ? m : { id: next.cardId, flipped: false }));
+        if ((next.phase === "voting" || next.phase === "finalizing") && next.cardId) {
+          const cid = next.cardId;
+          setCardModal((m) => (m?.id === cid ? m : { id: cid, flipped: false }));
+        }
+        
+        // 投票結果を全員に表示（新しいタイムスタンプのみ）
+        if (data.voteResult && data.voteResult.timestamp) {
+          const newTimestamp = data.voteResult.timestamp;
+          console.log('voteResult検出:', {
+            newTimestamp,
+            lastVoteResultTimestamp,
+            shouldShow: newTimestamp > lastVoteResultTimestamp,
+            voteResult: data.voteResult
+          });
+          
+          if (newTimestamp > lastVoteResultTimestamp) {
+            console.log('新しい投票結果を表示:', data.voteResult);
+            setLastVoteResultTimestamp(newTimestamp);
+            setVoteResultModal({
+              cardId: data.voteResult.cardId,
+              cardName: data.voteResult.cardName,
+              area: data.voteResult.area,
+            });
+          }
+        } else if (data.voteResult === null && voteResultModal) {
+          // voteResultがnullになったら、全員のモーダルを閉じる
+          console.log('voteResultが削除されたため、モーダルを閉じます');
+          setVoteResultModal(null);
         }
       } else {
         setActiveVote(null);
       }
     });
     return () => unsub();
-  }, [roomId]);
+  }, [roomId, lastVoteResultTimestamp, voteResultModal]);
 
-  // 投票状況購読（モーダル表示中のみ）
+  // 投票状況購読（voting/finalizing phase のみ）
   useEffect(() => {
     if (!roomId || typeof roomId !== "string") return;
-    const cid = activeVote?.cardId;
-    if (!cid || !activeVote?.modalOpen) {
+    const sessionId = activeVote?.sessionId;
+    const phase = activeVote?.phase;
+    
+    // voting または finalizing フェーズのみ購読
+    if (!sessionId || (phase !== "voting" && phase !== "finalizing")) {
       setVoteMap({});
       setMyVoteChoice(null);
       return;
     }
-    const nameToId = new Map<string, string>(
-      displayParticipants.map((p) => [p.name, p.id])
-    );
+    
     const validIds = new Set(displayParticipants.map((p) => p.id));
-    const resolvedSet = new Set(resolvedParticipantIds);
     const unsub = onSnapshot(
-      doc(db, "rooms", roomId, PLAY3_VOTE_COLLECTION, cid),
+      doc(db, "rooms", roomId, PLAY3_VOTE_SESSIONS, sessionId),
       (snap) => {
         const data: any = snap.data();
-        if (!data || data.sessionId !== activeVote.sessionId) {
+        if (!data) {
           setVoteMap({});
           setMyVoteChoice(null);
           return;
         }
-        const docRound =
-          typeof data.currentRound === "number" ? data.currentRound : 0;
+        
         const raw = data?.votes || {};
         const normalized: Record<string, VoteChoice> = {};
-        const allowUnknown =
-          validIds.size === 0 && resolvedSet.size === 0;
-        Object.entries(raw).forEach(([k, v]) => {
-          const parsed = parseVoteValue(v);
-          if (!parsed) return;
-          if (docRound > 0 && parsed.round !== docRound) return;
-          const trimmed = typeof k === "string" ? k.trim() : "";
+        
+        // sessionベースではround解析不要、直接choice値を取得
+        Object.entries(raw).forEach(([userId, choice]) => {
+          const trimmed = typeof userId === "string" ? userId.trim() : "";
           if (!trimmed) return;
-
-          let key = trimmed;
+          
+          // 参加者リストに含まれるIDのみ投票として認める
           if (validIds.has(trimmed)) {
-            key = trimmed;
-          } else if (nameToId.has(trimmed)) {
-            key = nameToId.get(trimmed)!;
+            normalized[trimmed] = choice as VoteChoice;
           } else {
-            // IDズレ対策: displayParticipantsに含まれないuserIdの投票は除外
             console.log(`投票を除外: ${trimmed} (参加者リストに存在しない)`);
-            return;
-          }
-
-          // 最終的にvalidIdsに含まれるキーのみ投票として認める
-          if (validIds.has(key)) {
-            normalized[key] = parsed.choice;
-          } else {
-            console.log(`投票を除外: ${key} (正規化後も参加者リストに存在しない)`);
           }
         });
+        
         const myServerChoice = normalized[myUserId];
         setVoteMap(() => {
           const merged: Record<string, VoteChoice> = { ...normalized };
-          if (
-            !myServerChoice &&
-            myUserId &&
-            myVoteChoice &&
-            (!activeVote.round || docRound === activeVote.round)
-          ) {
+          // 楽観更新された自分の投票が未反映なら追加
+          if (!myServerChoice && myUserId && myVoteChoice && validIds.has(myUserId)) {
             merged[myUserId] = myVoteChoice;
           }
           return merged;
         });
+        
         if (myServerChoice) {
           setMyVoteChoice(myServerChoice);
         }
@@ -920,9 +1095,8 @@ return (
     return () => unsub();
   }, [
     roomId,
-    activeVote?.cardId,
     activeVote?.sessionId,
-    activeVote?.modalOpen,
+    activeVote?.phase,
     activeVote?.round,
     displayParticipants,
     resolvedParticipantIds,
@@ -930,12 +1104,16 @@ return (
     myVoteChoice,
   ]);
 
-  // 全員投票完了で自動判定・クローズ（participants ベースで集計）
+  // 全員投票完了で自動判定・クローズ（transactionベースのphaseロック）
   useEffect(() => {
-    if (!activeVote?.modalOpen) return;
+    const phase = activeVote?.phase;
+    if (phase !== "voting") return;
+    
     const expectedIds = displayParticipants.map(p => p.id);
     const total = expectedIds.length;
-    if (total <= 0 || !activeVote.cardId) return;
+    const cardId = activeVote?.cardId;
+    const sessionId = activeVote?.sessionId;
+    if (total <= 0 || !cardId || !sessionId) return;
 
     const byId: Record<string, VoteChoice> = {};
     for (const id of expectedIds) {
@@ -950,104 +1128,194 @@ return (
     console.log('Vote completion check:', { voted, total, byId, expectedIds });
     
     if (voted >= total) {
-      const votes = Object.values(byId);
-      const allGo = votes.every((v) => v === "go");
-      const allNo = votes.every((v) => v === "no");
-
+      console.log('全員投票完了 - 集計処理を開始');
+      
       (async () => {
-        const goVotes = votes.filter((v) => v === "go").length;
-        const noVotes = votes.filter((v) => v === "no").length;
-        const pendingVotes = votes.filter((v) => v === "pending").length;
-
-        if (allGo) {
+        try {
+          // 0.2秒待機（書き込み遅延吸収）
+          await new Promise((r) => setTimeout(r, 200));
+          
+          if (!roomId || !cardId || !sessionId) return;
+          
+          // Transaction: voting → finalizing への排他的遷移
+          const acquiredLock = await runTransaction(db, async (transaction) => {
+            const sessionRef = doc(db, "rooms", roomId, PLAY3_VOTE_SESSIONS, sessionId);
+            const sessionSnap = await transaction.get(sessionRef);
+            
+            if (!sessionSnap.exists()) {
+              console.log('セッションが存在しません');
+              return false;
+            }
+            
+            const sessionData = sessionSnap.data();
+            const currentPhase = sessionData.phase;
+            
+            // 既にfinalizing/finishedなら処理しない
+            if (currentPhase === "finalizing" || currentPhase === "finished") {
+              console.log('既に集計処理中または完了:', currentPhase);
+              return false;
+            }
+            
+            // voting → finalizing に遷移（最初の1人だけ成功）
+            transaction.update(sessionRef, {
+              phase: "finalizing" as VotePhase,
+              updatedAt: serverTimestamp(),
+            });
+            
+            // play3State も finalizing に更新
+            const stateRef = doc(db, "rooms", roomId, "play3State", "state");
+            transaction.update(stateRef, {
+              phase: "finalizing" as VotePhase,
+              updatedAt: serverTimestamp(),
+              // 後方互換性のため modalOpen は維持
+            });
+            
+            console.log('finalizingフェーズロック獲得成功');
+            return true;
+          });
+          
+          if (!acquiredLock) {
+            console.log('他の端末が既に集計処理中');
+            return;
+          }
+          
+          // ロック獲得成功 - session docから最新投票を取得
+          const sessionSnap = await getDoc(
+            doc(db, "rooms", roomId, PLAY3_VOTE_SESSIONS, sessionId)
+          );
+          
+          if (!sessionSnap.exists()) {
+            console.error('セッションドキュメントが見つかりません');
+            return;
+          }
+          
+          const sessionData = sessionSnap.data();
+          const rawVotes = sessionData.votes || {};
+          
+          console.log('最新投票データ:', rawVotes);
+          
+          // 集計
+          const finalVotes: VoteChoice[] = expectedIds
+            .map((id) => rawVotes[id] as VoteChoice)
+            .filter((v): v is VoteChoice => !!v);
+          
+          const allGo = finalVotes.every((v) => v === "go");
+          const allNo = finalVotes.every((v) => v === "no");
+          const goVotes = finalVotes.filter((v) => v === "go").length;
+          const noVotes = finalVotes.filter((v) => v === "no").length;
+          const pendingVotes = finalVotes.filter((v) => v === "pending").length;
+          
+          let finalStatus: string;
+          let finalArea: string;
+          const cardInfo = getCard(cardId);
+          
+          if (allGo) {
+            finalStatus = "go";
+            finalArea = "行く";
+          } else if (allNo) {
+            finalStatus = "no";
+            finalArea = "行かない";
+          } else {
+            finalStatus = "vs";
+            finalArea = "議論中";
+          }
+          
+          // play3Assignments更新
           await setDoc(
-            doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
+            doc(db, "rooms", roomId, "play3Assignments", cardId),
             {
-              status: "go",
-              pending: false,
+              status: finalStatus,
+              pending: finalStatus === "vs",
               updatedAt: serverTimestamp(),
               updatedBy: userName || "unknown",
               voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: false, // 満場一致は黒枠なし
-              voteCompleted: true, // 投票完了フラグで再投票を防ぐ
+              hasBlackBorder: finalStatus === "vs",
+              voteCompleted: true,
             },
             { merge: true }
           );
-        } else if (allNo) {
+          
+          // play3VoteResults に結果保存
+          const resultId = `${cardId}_${sessionId}`;
           await setDoc(
-            doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
+            doc(db, "rooms", roomId, PLAY3_VOTE_RESULTS, resultId),
             {
-              status: "no",
-              pending: false,
-              updatedAt: serverTimestamp(),
-              updatedBy: userName || "unknown",
-              voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: false, // 満場一致は黒枠なし
-              voteCompleted: true, // 投票完了フラグで再投票を防ぐ
-            },
-            { merge: true }
+              cardId: cardId,
+              cardName: cardInfo?.title || cardId,
+              sessionId: sessionId,
+              round: activeVote?.round || 1,
+              startedBy: sessionData.startedBy || "unknown",
+              startedByName: sessionData.startedByName || "unknown",
+              participants: displayParticipants.map(p => ({
+                id: p.id,
+                name: p.name || "unknown",
+                vote: rawVotes[p.id] || "no-vote",
+              })),
+              result: {
+                status: finalStatus,
+                area: finalArea,
+                goVotes,
+                noVotes,
+                pendingVotes,
+              },
+              timestamp: serverTimestamp(),
+              completedAt: Date.now(),
+            }
           );
-        } else if (votes.every((v) => v === "pending")) {
+          
+          // play3VoteSessions を finished に更新
+          await updateDoc(
+            doc(db, "rooms", roomId, PLAY3_VOTE_SESSIONS, sessionId),
+            {
+              phase: "finished" as VotePhase,
+              resultRef: resultId,
+              finalizedAt: Date.now(),
+              updatedAt: serverTimestamp(),
+            }
+          );
+          
+          // play3State をクリア & 投票結果を全員に通知
           await setDoc(
-            doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
+            doc(db, "rooms", roomId, "play3State", "state"),
             {
-              status: "vs",
-              pending: true,
+              phase: "idle" as VotePhase,
+              cardId: null,
+              sessionId: null,
+              round: null,
+              expectedUserIds: [],
+              voteResult: {
+                cardId: cardId,
+                cardName: cardInfo?.title || cardId,
+                area: finalArea,
+                timestamp: Date.now(),
+              },
               updatedAt: serverTimestamp(),
-              updatedBy: userName || "unknown",
-              voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: true,
-              voteCompleted: true, // 投票完了フラグ
+              // 後方互換
+              modalOpen: false,
+              initiatedById: null,
+              initiatedByName: null,
             },
             { merge: true }
           );
-        } else {
-          await setDoc(
-            doc(db, "rooms", roomId!, "play3Assignments", activeVote.cardId),
-            {
-              status: "vs",
-              pending: true,
-              updatedAt: serverTimestamp(),
-              updatedBy: userName || "unknown",
-              voteResult: { go: goVotes, no: noVotes, pending: pendingVotes },
-              hasBlackBorder: true,
-              voteCompleted: true, // 投票完了フラグ
-            },
-            { merge: true }
-          );
+          
+          console.log('投票完了 - 結果保存完了:', { cardId, area: finalArea });
+          
+        } catch (e) {
+          console.error("投票集計中にエラー:", e);
+        } finally {
+          setMyVoteChoice(null);
+          setVoteMap({});
+          closeCard();
         }
-
-        // 投票状態をクリア
-        await setDoc(
-          doc(db, "rooms", roomId!, "play3State", "state"),
-          {
-            cardId: null,
-            modalOpen: false,
-            sessionId: null,
-            initiatedBy: null,
-            initiatedById: null,
-            initiatedByName: null,
-            round: null,
-            expectedUserIds: [],
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
-
-        setUiLocked(false);
-        setUiLockReason(null);
-        setMyVoteChoice(null);
-        setVoteMap({});
-        closeCard();
       })();
     }
   }, [
-    activeVote?.modalOpen,
+    activeVote?.phase,
     activeVote?.cardId,
     activeVote?.round,
     activeVote?.sessionId,
     voteMap,
-    displayParticipants, // expectedVoteIdsから変更
+    displayParticipants,
     myVoteChoice,
     roomId,
     myUserId,
@@ -1062,6 +1330,7 @@ return (
   const startVote = async (choice: VoteChoice, targetCardId?: string) => {
     const effectiveUserId = myUserId?.trim();
     if (!roomId || typeof roomId !== "string" || !effectiveUserId) return;
+    
     if (!isActualParticipant) {
       alert(
         "この端末のIDが部屋の参加者として認識されていません。\n右上の参加者名と一致する端末から投票してください。"
@@ -1072,45 +1341,7 @@ return (
     const cid = targetCardId || cardModal?.id;
     if (!cid) return;
     
-    // 投票開始時に黒枠を一時的に解除（投票中状態にする）
-    try {
-      await setDoc(
-        doc(db, "rooms", roomId, "play3Assignments", cid),
-        {
-          hasBlackBorder: false,
-          voteCompleted: false,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    } catch (error) {
-      console.warn("Failed to clear black border", error);
-    }
-    
-    const sessionId = `${cid}-${Date.now()}`;
-    const cardRef = doc(db, "rooms", roomId, PLAY3_VOTE_COLLECTION, cid);
-    let nextRound = 1;
-    let history: Record<string, Record<string, string>> = {};
-    
-    try {
-      const snap = await getDoc(cardRef);
-      if (snap.exists()) {
-        const data: any = snap.data();
-        const prevRound = typeof data.currentRound === "number" ? data.currentRound : 0;
-        const prevVotes: Record<string, string> = (data?.votes || {}) as any;
-        const prevHistory: Record<string, Record<string, string>> =
-          (data?.history as Record<string, Record<string, string>>) || {};
-        history = { ...prevHistory };
-        if (prevRound > 0 && Object.keys(prevVotes || {}).length > 0) {
-          const key = `y${prevRound}`;
-          history[key] = { ...(history[key] || {}), ...prevVotes };
-        }
-        nextRound = prevRound > 0 ? prevRound + 1 : 1;
-      }
-    } catch (error) {
-      console.warn("Failed to load existing play3Votes doc", error);
-    }
-    // 分母は常に実参加者（表示中の参加者）
+    // 参加者IDリスト（実参加者ベース）
     const participantIds = Array.from(
       new Set(
         displayParticipants
@@ -1118,60 +1349,133 @@ return (
           .filter((id): id is string => !!id && id.length > 0)
       )
     );
-
-    // 自分が含まれていない場合は追加（安全策）
     const trimmedSelf = effectiveUserId?.trim();
     if (trimmedSelf && !participantIds.includes(trimmedSelf)) {
       participantIds.push(trimmedSelf);
     }
-
-    const myKey = effectiveUserId;
-    const voteValue = formatVoteValue(nextRound, choice);
-    await setDoc(
-      cardRef,
-      {
-        cardId: cid,
-        sessionId,
-        currentRound: nextRound,
-        votes: { [myKey]: voteValue },
-        history,
-        expectedUserIds: participantIds, // ← 実参加者に固定
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
-    await setDoc(
-      doc(db, "rooms", roomId, "play3State", "state"),
-      {
-        cardId: cid,
-        modalOpen: true,
-        sessionId,
-        initiatedBy: normalizedUserName || userName || myUserId,
-        initiatedById: myUserId,
-        initiatedByName: normalizedUserName || userName || myUserId,
-        round: nextRound,
-        expectedUserIds: participantIds, // ← 実参加者に固定
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
-    setUiLocked(true); // 最初に押した人はロック
-    setUiLockReason("vote");
-    setMyVoteChoice(choice);
-    // 押した瞬間に自分の投票アイコンを出す（楽観更新）
+    
     try {
-      setVoteMap((prev) => ({
-        ...prev,
-        [effectiveUserId]: choice,
-      }));
-    } catch {}
+      // Transactionで既存セッション確認 & 新規セッション開始の排他制御
+      const result = await runTransaction(db, async (transaction) => {
+        const stateRef = doc(db, "rooms", roomId, "play3State", "state");
+        const stateSnap = await transaction.get(stateRef);
+        const stateData = stateSnap.data() as any;
+        
+        // 後方互換性: phase ?? modalOpen
+        const currentPhase: VotePhase = stateData?.phase || (stateData?.modalOpen ? "voting" : "idle");
+        
+        // 既に投票中の場合 → 既存セッションへの参加を許可（投票は後でcastVoteで実施）
+        if (currentPhase === "voting" && stateData?.cardId === cid && stateData?.sessionId) {
+          console.log("既存セッションに参加:", stateData.sessionId);
+          return { action: "join" as const, sessionId: stateData.sessionId };
+        }
+        
+        // 他のカードで投票中
+        if ((currentPhase === "voting" || currentPhase === "finalizing") && stateData?.cardId !== cid) {
+          console.log("他のカードで投票中");
+          throw new Error("blocked");
+        }
+        
+        // finalizing状態なら新規投票不可
+        if (currentPhase === "finalizing") {
+          console.log("集計中");
+          throw new Error("blocked");
+        }
+        
+        // 投票完了状態確認
+        const assignmentRef = doc(db, "rooms", roomId, "play3Assignments", cid);
+        const assignmentSnap = await transaction.get(assignmentRef);
+        let isBlackBorder = false;
+        if (assignmentSnap.exists()) {
+          const assignmentData = assignmentSnap.data();
+          isBlackBorder = assignmentData.hasBlackBorder === true;
+          // 完了済みかつ黒枠でない → 開始不可
+          if (assignmentData.voteCompleted && !isBlackBorder) {
+            console.log("カードは投票完了済み（黒枠なし）");
+            throw new Error("completed");
+          }
+          // 黒枠カード（VS）は再投票可能
+        }
+        
+        // 新規セッション開始（idle状態 または 黒枠カードの再投票）
+        const sessionId = `${cid}-${Date.now()}`;
+        const now = Date.now();
+        
+        console.log("新規セッション開始:", { sessionId, isBlackBorder });
+        
+        // play3VoteSessionsに新規セッション作成（votes は空で開始、castVoteで投票を記録）
+        const sessionRef = doc(db, "rooms", roomId, PLAY3_VOTE_SESSIONS, sessionId);
+        transaction.set(sessionRef, {
+          cardId: cid,
+          sessionId,
+          phase: "voting" as VotePhase,
+          round: 1,
+          expectedUserIds: participantIds,
+          votes: {},
+          startedBy: effectiveUserId,
+          startedByName: normalizedUserName || userName || "unknown",
+          createdAt: now,
+          updatedAt: serverTimestamp(),
+        });
+        
+        // play3State更新（phase: voting）
+        transaction.set(stateRef, {
+          phase: "voting" as VotePhase,
+          cardId: cid,
+          sessionId,
+          round: 1,
+          expectedUserIds: participantIds,
+          createdAt: now,
+          updatedAt: serverTimestamp(),
+          // 後方互換
+          modalOpen: true,
+          initiatedById: effectiveUserId,
+          initiatedByName: normalizedUserName || userName || "unknown",
+        }, { merge: true });
+        
+        // play3Assignments更新（投票中状態）
+        transaction.set(assignmentRef, {
+          hasBlackBorder: false,
+          voteCompleted: false,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+        
+        return { action: "started" as const, sessionId };
+      });
+      
+      // Transaction成功後、ローカル状態更新
+      setUiLocked(true);
+      setUiLockReason("vote");
+      
+      console.log("startVote完了:", result);
+      
+      // 新規セッション作成時のみ、初回投票を実行
+      if (result.action === "started") {
+        setMyVoteChoice(choice);
+        setVoteMap((prev) => ({
+          ...prev,
+          [effectiveUserId]: choice,
+        }));
+        
+        // castVoteを呼び出して投票を記録
+        await castVote(choice);
+      }
+      // 既存セッションに参加する場合は、castVoteを直接呼ぶ必要がある（ボタンから）
+      
+    } catch (error: any) {
+      console.error("startVote transaction failed:", error);
+      if (error.message?.includes("blocked")) {
+        alert("現在、別の投票が進行中です");
+      } else if (error.message?.includes("completed")) {
+        alert("この目的地は既に投票が完了しています");
+      }
+    }
   };
 
   const castVote = async (choice: VoteChoice) => {
     if (
       !roomId ||
       typeof roomId !== "string" ||
-      !activeVote?.cardId ||
       !activeVote?.sessionId ||
       !myUserId
     )
@@ -1188,17 +1492,14 @@ return (
         [myUserId]: choice,
       }));
     } catch {}
-    const myKey = myUserId;
-    const round = activeVote.round > 0 ? activeVote.round : 1;
-    const voteValue = formatVoteValue(round, choice);
+    
+    // play3VoteSessions/{sessionId} に直接投票を記録（roundエンコード不要）
     await setDoc(
-      doc(db, "rooms", roomId, PLAY3_VOTE_COLLECTION, activeVote.cardId),
+      doc(db, "rooms", roomId, PLAY3_VOTE_SESSIONS, activeVote.sessionId),
       {
-        sessionId: activeVote.sessionId,
-        currentRound: round,
+        [`votes.${myUserId}`]: choice,
         updatedAt: serverTimestamp(),
-        [`votes.${myKey}`]: voteValue,
-      } as any,
+      },
       { merge: true }
     );
   };
@@ -1208,8 +1509,8 @@ return (
 
   if (isLoading) {
     return (
-      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
-        読み込み中...
+      <div className={styles.loadingContainer}>
+        <div className={styles.loadingText}>読み込み中...</div>
       </div>
     );
   }
@@ -1217,100 +1518,56 @@ return (
   // 整列済み ID
   const goSorted = sortByAgreement(goIds);
   const noSorted = sortByAgreement(noIds);
-  const vsSorted = sortByAgreement(vsIds);
+  const vsSorted = sortVsByAgreementAndNumber(vsIds); // VS: 合致率が低い順 → カード番号順
   const neuSorted = sortByAgreement(neutralIds);
+
+  console.log("[Play3 Render]", {
+    goCount: goSorted.length,
+    noCount: noSorted.length,
+    vsCount: vsSorted.length,
+    neuCount: neuSorted.length,
+    uiLocked,
+    uiLockReason,
+    canEndGame: vsSorted.length === 0 && !uiLocked
+  });
 
   // 縮小時はカード幅も少し小さく
   const TILE_W = scale < 1 ? 180 : 220;
 
   return (
     <div
-      style={{
-        minHeight: "100vh",
-        background: "#fff",
-        overflowX: "hidden",
-        cursor: uiLocked && uiLockReason === "vote" ? "progress" : "default",
-      }}
+      className={`${styles.container} ${uiLocked && uiLockReason === "vote" ? styles.containerLocked : ""}`}
     >
       <div
-        style={{
-          transform: `scale(${scale})`,
-          transformOrigin: "top center",
-          width: "100%",
-          margin: "0 auto",
-          boxSizing: "border-box",
-        }}
+        className={styles.scaleWrapper}
+        style={{ transform: `scale(${scale})` }}
       >
         {/* ヘッダー行 */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "12px 16px",
-            borderBottom: "1px solid #e5e7eb",
-          }}
-        >
-          <div style={{ fontWeight: 900, color: "#111827" }}>
+        <div className={styles.header}>
+          <div className={styles.agreementRate}>
             合致率 {overallAgreement.toFixed(0)}%
           </div>
           {renderAvatars()}
         </div>
 
         {/* 開始メッセージ */}
-        <div
-          style={{
-            padding: "10px 16px",
-            background: "#fffbeb",
-            borderBottom: "1px solid #fde68a",
-            color: "#92400e",
-            fontWeight: 700,
-          }}
-        >
-          投票しましょう！
+        <div className={styles.startMessage}>
+          カードを参照して、議論を行い、VSエリアのカードを0枚にしましょう！
         </div>
 
-        {/* 上段: 行く / 行かない */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-            gap: 12,
-            padding: 12,
-          }}
-        >
-          {/* 行く */}
-          <section
-            style={{
-              minWidth: 0,
-              background: "#fee2e2",
-              border: "2px solid #fca5a5",
-              borderRadius: 12,
-              padding: 10,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 8,
-              }}
-            >
-              <div style={{ fontWeight: 900, color: "#7f1d1d" }}>行く</div>
-              <div style={{ color: "#7f1d1d", fontWeight: 700 }}>
-                {goSorted.length}
+        {/* スクロール可能コンテンツエリア */}
+        <div className={styles.contentArea}>
+          {/* 上段: 行く / 行かない */}
+          <div className={styles.mainGrid}>
+            {/* 行く */}
+            <section className={styles.sectionGo}>
+              <div className={styles.sectionHeader}>
+                <div className={styles.sectionTitleGo}>行く</div>
+                <div className={styles.sectionCountGo}>
+                  {goSorted.length}
+                </div>
               </div>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                overflowX: "auto",
-                paddingBottom: 4,
-                flexWrap: "nowrap",
-              }}
-            >
+            <div className={styles.cardContainer}>
               {goSorted.map((id) => {
                 const info = getCard(id);
                 const ag = agreementMap.get(id) || 0;
@@ -1318,35 +1575,20 @@ return (
                   <div
                     key={id}
                     onClick={() => openCard(id)}
-                    style={{
-                      cursor: "pointer",
-                      width: TILE_W,
-                      flex: "0 0 auto",
-                      border: "1px solid #e5e7eb",
-                      background: "#fff",
-                      borderRadius: 12,
-                      overflow: "hidden",
-                    }}
+                    className={styles.cardTile}
+                    style={{ width: TILE_W }}
                   >
-                    <div style={{ width: "100%", aspectRatio: "3/2", background: "#fff" }}>
+                    <div className={styles.cardImage}>
                       <img
                         src={info?.src}
                         alt={info?.title}
-                        style={{ width: "100%", height: "100%", objectFit: "contain" }}
                       />
                     </div>
-                    <div
-                      style={{
-                        padding: "6px 8px",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                      }}
-                    >
-                      <div style={{ fontWeight: 800, color: "#111827", fontSize: 12 }}>
+                    <div className={styles.cardInfo}>
+                      <div className={styles.cardTitle}>
                         {info?.title}
                       </div>
-                      <div style={{ fontWeight: 800, color: "#334155", fontSize: 12 }}>
+                      <div className={styles.cardAgreement}>
                         {ag.toFixed(0)}%
                       </div>
                     </div>
@@ -1357,37 +1599,14 @@ return (
           </section>
 
           {/* 行かない */}
-          <section
-            style={{
-              minWidth: 0,
-              background: "#1e3a8a",
-              border: "2px solid #334155",
-              borderRadius: 12,
-              padding: 10,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 8,
-              }}
-            >
-              <div style={{ fontWeight: 900, color: "#fff" }}>行かない</div>
-              <div style={{ color: "#e2e8f0", fontWeight: 700 }}>
+          <section className={styles.sectionNoGo}>
+            <div className={styles.sectionHeader}>
+              <div className={styles.sectionTitleNoGo}>行かない</div>
+              <div className={styles.sectionCountNoGo}>
                 {noSorted.length}
               </div>
             </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                overflowX: "auto",
-                paddingBottom: 4,
-                flexWrap: "nowrap",
-              }}
-            >
+            <div className={styles.cardContainer}>
               {noSorted.map((id) => {
                 const info = getCard(id);
                 const ag = agreementMap.get(id) || 0;
@@ -1395,35 +1614,23 @@ return (
                   <div
                     key={id}
                     onClick={() => openCard(id)}
-                    style={{
-                      cursor: "pointer",
+                    className={styles.cardTile}
+                    style={{ 
                       width: TILE_W,
-                      flex: "0 0 auto",
                       border: "1px solid #475569",
-                      background: "#fff",
-                      borderRadius: 12,
-                      overflow: "hidden",
                     }}
                   >
-                    <div style={{ width: "100%", aspectRatio: "3/2", background: "#fff" }}>
+                    <div className={styles.cardImage}>
                       <img
                         src={info?.src}
                         alt={info?.title}
-                        style={{ width: "100%", height: "100%", objectFit: "contain" }}
                       />
                     </div>
-                    <div
-                      style={{
-                        padding: "6px 8px",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                      }}
-                    >
-                      <div style={{ fontWeight: 800, color: "#111827", fontSize: 12 }}>
+                    <div className={styles.cardInfo}>
+                      <div className={styles.cardTitle}>
                         {info?.title}
                       </div>
-                      <div style={{ fontWeight: 800, color: "#334155", fontSize: 12 }}>
+                      <div className={styles.cardAgreement}>
                         {ag.toFixed(0)}%
                       </div>
                     </div>
@@ -1432,38 +1639,16 @@ return (
               })}
             </div>
           </section>
-        </div>
+          </div>
 
-        {/* 中央: 議論中（VS） */}
-        <div style={{ padding: "0 12px 12px" }}>
-          <section
-            style={{
-              background: "#ffedd5",
-              border: "2px solid #fdba74",
-              borderRadius: 12,
-              padding: 10,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 8,
-              }}
-            >
-              <div style={{ fontWeight: 900, color: "#9a3412" }}>議論中（VS）</div>
-              <div style={{ color: "#9a3412", fontWeight: 700 }}>{vsSorted.length}</div>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                overflowX: "auto",
-                paddingBottom: 4,
-                flexWrap: "nowrap",
-              }}
-            >
+          {/* 中央: 議論中（VS） */}
+          <div className={styles.sectionWrapper}>
+            <section className={styles.sectionVs}>
+              <div className={styles.sectionHeader}>
+                <div className={styles.sectionTitleVs}>議論中（VS）</div>
+                <div className={styles.sectionCountVs}>{vsSorted.length}</div>
+              </div>
+            <div className={styles.cardContainer}>
               {vsSorted.map((id) => {
                 const info = getCard(id);
                 const ag = agreementMap.get(id) || 0;
@@ -1472,35 +1657,23 @@ return (
                   <div
                     key={id}
                     onClick={() => openCard(id)}
+                    className={styles.cardTile}
                     style={{
-                      cursor: "pointer",
                       width: TILE_W,
-                      flex: "0 0 auto",
                       border: hasBlackBorder ? "6px solid #000" : "2px solid #e5e7eb",
-                      background: "#fff",
-                      borderRadius: 12,
-                      overflow: "hidden",
                     }}
                   >
-                    <div style={{ width: "100%", aspectRatio: "3/2", background: "#fff" }}>
+                    <div className={styles.cardImage}>
                       <img
                         src={info?.src}
                         alt={info?.title}
-                        style={{ width: "100%", height: "100%", objectFit: "contain" }}
                       />
                     </div>
-                    <div
-                      style={{
-                        padding: "6px 8px",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                      }}
-                    >
-                      <div style={{ fontWeight: 800, color: "#111827", fontSize: 12 }}>
+                    <div className={styles.cardInfo}>
+                      <div className={styles.cardTitle}>
                         {info?.title}
                       </div>
-                      <div style={{ fontWeight: 800, color: "#334155", fontSize: 12 }}>
+                      <div className={styles.cardAgreement}>
                         {ag.toFixed(0)}%
                       </div>
                     </div>
@@ -1511,36 +1684,25 @@ return (
           </section>
         </div>
 
-        {/* 下部: どちらでも（折りたたみ・モーダル表示） */}
-        <div style={{ padding: "0 12px 80px" }}>
-          <section
-            style={{
-              background: "#e5e7eb",
-              border: "2px solid #d1d5db",
-              borderRadius: 12,
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: 10,
-                cursor: "pointer",
-              }}
-              onClick={() => setNeutralOpen(true)}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ fontWeight: 900, color: "#374151" }}>どちらでも</div>
-                <div style={{ transform: neutralOpen ? "rotate(180deg)" : "rotate(0deg)" }}>
-                  ^
+          {/* 下部: どちらでも（折りたたみ・モーダル表示） */}
+          <div className={styles.sectionWrapper}>
+            <section className={styles.sectionNeutral}>
+              <div
+                className={styles.sectionNeutralHeader}
+                onClick={() => setNeutralOpen(true)}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div className={styles.sectionTitleNeutral}>どちらでも</div>
+                  <div style={{ transform: neutralOpen ? "rotate(180deg)" : "rotate(0deg)" }}>
+                    ^
+                  </div>
                 </div>
+                <div className={styles.sectionCountNeutral}>{neuSorted.length}</div>
               </div>
-              <div style={{ color: "#374151", fontWeight: 700 }}>{neuSorted.length}</div>
-            </div>
-          </section>
+            </section>
+          </div>
         </div>
+        {/* contentArea 終了 */}
 
         {/* どちらでも一覧モーダル */}
         {neutralOpen && (
@@ -1562,43 +1724,40 @@ return (
                 maxHeight: "80vh",
                 background: "#fff",
                 borderRadius: 12,
-                padding: 16,
                 boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
-                overflow: "auto",
+                display: "flex",
+                flexDirection: "column",
               }}
               onClick={(e) => e.stopPropagation()}
             >
+              {/* ヘッダー */}
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 12,
+                  padding: "16px",
+                  borderBottom: "1px solid #e5e7eb",
+                  flexShrink: 0,
                 }}
               >
                 <div style={{ fontWeight: 900, fontSize: 18, color: "#111827" }}>
                   どちらでも（{neuSorted.length}）
                 </div>
-                <button
-                  onClick={() => setNeutralOpen(false)}
-                  style={{
-                    border: "1px solid #e5e7eb",
-                    background: "#fff",
-                    borderRadius: 8,
-                    padding: "6px 10px",
-                    fontWeight: 800,
-                  }}
-                >
-                  閉じる
-                </button>
               </div>
+              
+              {/* カード表示エリア - スクロール可能 */}
               <div
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-                  gap: 12,
+                  flex: 1,
+                  padding: "16px",
+                  overflow: "auto",
                 }}
               >
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                    gap: 12,
+                  }}
+                >
                 {neuSorted.map((id) => {
                   const info = getCard(id);
                   const ag = agreementMap.get(id) || 0;
@@ -1632,16 +1791,53 @@ return (
                           alignItems: "center",
                         }}
                       >
-                        <div style={{ fontWeight: 800, color: "#111827", fontSize: 12 }}>
+                        <div style={{ fontWeight: 800, color: "#111827", fontSize: 13 }}>
                           {info?.title}
                         </div>
-                        <div style={{ fontWeight: 800, color: "#334155", fontSize: 12 }}>
+                        <div style={{ 
+                          fontWeight: 900, 
+                          color: "#fff", 
+                          fontSize: 14,
+                          background: "linear-gradient(135deg, #0ea5e9, #3b82f6)",
+                          padding: "4px 10px",
+                          borderRadius: 20,
+                          boxShadow: "0 2px 6px rgba(59, 130, 246, 0.3)",
+                          minWidth: 50,
+                          textAlign: "center"
+                        }}>
                           {ag.toFixed(0)}%
                         </div>
                       </div>
                     </div>
                   );
                 })}
+                </div>
+              </div>
+              
+              {/* フッター - 固定配置の閉じるボタン */}
+              <div
+                style={{
+                  padding: "12px 16px",
+                  borderTop: "1px solid #e5e7eb",
+                  display: "flex",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <button
+                  onClick={() => setNeutralOpen(false)}
+                  style={{
+                    border: "1px solid #d1d5db",
+                    background: "#f3f4f6",
+                    borderRadius: 8,
+                    padding: "8px 24px",
+                    fontWeight: 700,
+                    color: "#6b7280",
+                    cursor: "pointer",
+                  }}
+                >
+                  閉じる
+                </button>
               </div>
             </div>
           </div>
@@ -1650,16 +1846,126 @@ return (
         {/* 参加者情報モーダル */}
         {activeUserInfo &&
           (() => {
-            const user = selections.find((s) => s.userId === activeUserInfo);
-            const counts = user
-              ? {
-                  veryWant: user.categories.veryWant.length,
-                  want: user.categories.want.length,
-                  neutral: user.categories.neutral.length,
-                  dont: user.categories.dont.length,
-                  veryDont: user.categories.veryDont.length,
-                }
-              : { veryWant: 0, want: 0, neutral: 0, dont: 0, veryDont: 0 };
+            console.log('[Play3] Modal opened for:', {
+              activeUserInfo,
+              allSelections: selections.map(s => ({ 
+                userId: s.userId, 
+                user: s.user, 
+                userName: s.userName,
+                veryWantCount: s.categories?.veryWant?.length || 0,
+                wantCount: s.categories?.want?.length || 0,
+                neutralCount: s.categories?.neutral?.length || 0,
+                dontCount: s.categories?.dont?.length || 0,
+                veryDontCount: s.categories?.veryDont?.length || 0,
+              }))
+            });
+            
+            // resultページと同じロジック: selectionsから直接取得
+            // activeUserInfo は ID（p.idで設定される）であることを前提
+            const user = selections.find((s) => 
+              s.userId === activeUserInfo || 
+              s.user === activeUserInfo
+            );
+            
+            // displayParticipantsからも名前を取得
+            const participant = displayParticipants.find(p => p.id === activeUserInfo);
+            const displayName = user?.userName || participant?.name || activeUserInfo;
+            const displayPlanName = user?.planName || participant?.plan || "—";
+            
+            if (!user) {
+              console.log('[Play3] User not found in selections:', {
+                activeUserInfo,
+                availableUserIds: selections.map(s => s.userId),
+                availableUsers: selections.map(s => s.user),
+                availableUserNames: selections.map(s => s.userName),
+              });
+              // ユーザーが見つからない場合でも基本的なモーダルを表示
+              return (
+                <div
+                  style={{
+                    position: "fixed",
+                    inset: 0,
+                    background: "rgba(0,0,0,0.45)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    zIndex: 100,
+                  }}
+                  onClick={() => setActiveUserInfo(null)}
+                >
+                  <div
+                    style={{
+                      width: 420,
+                      background: "#fff",
+                      borderRadius: 12,
+                      padding: 16,
+                      boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+                      border: "1px solid #e5e7eb",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>
+                      {displayName}
+                    </div>
+                    <div style={{ color: "#374151", marginBottom: 10 }}>
+                      プラン名：<strong style={{ color: "#000000" }}>
+                        {displayPlanName}
+                      </strong>
+                    </div>
+                    <div style={{ padding: 16, textAlign: "center", color: "#6b7280" }}>
+                      このユーザーのカード情報がまだ読み込まれていません
+                    </div>
+                    <div style={{ textAlign: "center", marginTop: 12 }}>
+                      <button
+                        onClick={() => setActiveUserInfo(null)}
+                        style={{
+                          padding: "8px 24px",
+                          border: "1px solid #d1d5db",
+                          borderRadius: 8,
+                          background: "#f3f4f6",
+                          fontWeight: 700,
+                          color: "#6b7280",
+                          cursor: "pointer",
+                        }}
+                      >
+                        閉じる
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            
+            console.log('[Play3] 参加者情報モーダル:', {
+              activeUserInfo,
+              participant,
+              foundUser: { 
+                userId: user.userId, 
+                user: user.user, 
+                userName: user.userName,
+                categories: user.categories 
+              },
+              displayName,
+              displayPlanName
+            });
+            
+            const counts = {
+              veryWant: user.categories.veryWant.length,
+              want: user.categories.want.length,
+              neutral: user.categories.neutral.length,
+              dont: user.categories.dont.length,
+              veryDont: user.categories.veryDont.length,
+            };
+            
+            // カテゴリごとの色定義
+            const categoryColors: Record<string, { bg: string; border: string; text: string }> = {
+              veryWant: { bg: '#fecaca', border: '#fca5a5', text: '#7f1d1d' }, // 赤
+              want: { bg: '#fce7f3', border: '#fbcfe8', text: '#9d174d' }, // ピンク
+              neutral: { bg: '#e5e7eb', border: '#d1d5db', text: '#374151' }, // 灰色
+              dont: { bg: '#bae6fd', border: '#93c5fd', text: '#0c4a6e' }, // 水色
+              veryDont: { bg: '#93c5fd', border: '#60a5fa', text: '#1e3a8a' }, // 青色
+            };
+            
             const catOrder: Array<{ key: keyof typeof counts; label: string }> = [
               { key: "veryWant", label: "特に行きたい" },
               { key: "want", label: "行きたい" },
@@ -1667,8 +1973,11 @@ return (
               { key: "dont", label: "行きたくない" },
               { key: "veryDont", label: "特に行きたくない" },
             ];
-            const getList = (k: keyof typeof counts) =>
-              user ? user.categories[k] : [];
+            
+            // resultページと同じロジック: selectionsから直接カードリストを取得
+            const getList = (k: keyof typeof counts) => {
+              return user.categories[k] || [];
+            };
             return (
               <div
                 style={{
@@ -1694,11 +2003,11 @@ return (
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>
-                    {user?.userName}
+                    {displayName}
                   </div>
                   <div style={{ color: "#374151", marginBottom: 10 }}>
                     プラン名：<strong style={{ color: "#000000" }}>
-                      {user?.planName || "—"}
+                      {displayPlanName}
                     </strong>
                   </div>
                   <div style={{ display: "grid", gap: 8 }}>
@@ -1710,10 +2019,23 @@ return (
                           [key as string]: !expanded,
                         }));
                       const list = getList(key);
+                      const colors = categoryColors[key as string] || categoryColors.neutral;
+                      
+                      console.log(`[Play3] Category ${key}:`, {
+                        expanded,
+                        listLength: list.length,
+                        list: list,
+                        user: user ? { userId: user.userId, userName: user.userName } : null
+                      });
+                      
                       return (
                         <div
                           key={key}
-                          style={{ border: "1px solid #e5e7eb", borderRadius: 10 }}
+                          style={{ 
+                            border: `2px solid ${colors.border}`, 
+                            borderRadius: 10,
+                            background: colors.bg,
+                          }}
                         >
                           <div
                             onClick={toggle}
@@ -1725,12 +2047,13 @@ return (
                               cursor: "pointer",
                             }}
                           >
-                            <div>{label}</div>
+                            <div style={{ fontWeight: 700, color: colors.text }}>{label}</div>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                              <span style={{ fontWeight: 800 }}>{list.length}</span>
+                              <span style={{ fontWeight: 800, color: colors.text }}>{list.length}</span>
                               <span
                                 style={{
                                   transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+                                  color: colors.text,
                                 }}
                               >
                                 ^
@@ -1743,30 +2066,42 @@ return (
                                 padding: "8px 10px",
                                 display: "grid",
                                 gap: 6,
+                                background: "#fff",
                               }}
                             >
                               {list.length ? (
                                 list.map((c, idx) => {
-                                  const info = ALL_CARDS.find((x) => x.id === c.id);
+                                  const info = getCard(c.id);
                                   const reason = (c as any).reason || "";
+                                  
+                                  console.log('[Play3] Card in user modal:', {
+                                    cardId: c.id,
+                                    foundInfo: info,
+                                    title: info?.title,
+                                    reason,
+                                    allCardsLength: ALL_CARDS.length
+                                  });
+                                  
                                   return (
                                     <div
                                       key={idx}
                                       style={{
-                                        border: "1px solid #e5e7eb",
+                                        border: "1px solid #d1d5db",
                                         borderRadius: 8,
                                         padding: 8,
+                                        background: "#f9fafb",
                                       }}
                                     >
                                       <div
-                                        style={{ fontWeight: 700, color: "#0f172a" }}
+                                        style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}
                                       >
                                         {info?.title || c.id}
                                       </div>
                                       <div
                                         style={{
-                                          fontSize: 12,
-                                          color: reason ? "#000000" : "#94a3b8",
+                                          fontSize: 11,
+                                          color: reason ? "#475569" : "#94a3b8",
+                                          marginTop: 4,
                                         }}
                                       >
                                         理由: {reason || "（なし）"}
@@ -1775,7 +2110,7 @@ return (
                                   );
                                 })
                               ) : (
-                                <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                                <div style={{ fontSize: 13, color: "#ef4444", fontWeight: 700, padding: "8px 0" }}>
                                   カードはありません
                                 </div>
                               )}
@@ -1785,15 +2120,17 @@ return (
                       );
                     })}
                   </div>
-                  <div style={{ textAlign: "right", marginTop: 12 }}>
+                  <div style={{ textAlign: "center", marginTop: 12 }}>
                     <button
                       onClick={() => setActiveUserInfo(null)}
                       style={{
-                        padding: "8px 12px",
-                        border: "1px solid #e5e7eb",
+                        padding: "8px 24px",
+                        border: "1px solid #d1d5db",
                         borderRadius: 8,
-                        background: "#fff",
+                        background: "#f3f4f6",
                         fontWeight: 700,
+                        color: "#6b7280",
+                        cursor: "pointer",
                       }}
                     >
                       閉じる
@@ -1847,7 +2184,7 @@ return (
                 }}
                 onClick={() => {
                   // 全員投票モードの最中は外クリックで閉じられない（全員統一表示を維持）
-                  if (activeVote?.modalOpen) return;
+                  if (activeVote?.phase === "voting" || activeVote?.phase === "finalizing") return;
                   closeCard();
                 }}
               >
@@ -2040,11 +2377,11 @@ return (
                           padding: "10px 14px",
                           borderRadius: 10,
                           border: "none",
-                          background: votedNo ? "#172554" : "#1e3a8a",
+                          background: votedNo ? "#1e40af" : "#60a5fa", // 柔らかい青
                           color: "#fff",
                           fontWeight: 900,
                           boxShadow: votedNo
-                            ? "0 0 0 3px rgba(30,58,138,0.35) inset"
+                            ? "0 0 0 3px rgba(96,165,250,0.35) inset"
                             : undefined,
                           transform: votedNo ? "translateY(1px)" : undefined,
                           transition: "all .12s ease",
@@ -2055,11 +2392,11 @@ return (
                           padding: "10px 14px",
                           borderRadius: 10,
                           border: "none",
-                          background: votedGo ? "#b91c1c" : "#ef4444",
+                          background: votedGo ? "#db2777" : "#f9a8d4", // ピンク
                           color: "#fff",
                           fontWeight: 900,
                           boxShadow: votedGo
-                            ? "0 0 0 3px rgba(239,68,68,0.35) inset"
+                            ? "0 0 0 3px rgba(249,168,212,0.35) inset"
                             : undefined,
                           transform: votedGo ? "translateY(1px)" : undefined,
                           transition: "all .12s ease",
@@ -2070,11 +2407,11 @@ return (
                           padding: "10px 14px",
                           borderRadius: 10,
                           border: "none",
-                          background: votedPending ? "#a16207" : "#eab308",
-                          color: "#fff",
+                          background: votedPending ? "#ca8a04" : "#fef08a", // 薄い黄色
+                          color: votedPending ? "#fff" : "#713f12",
                           fontWeight: 900,
                           boxShadow: votedPending
-                            ? "0 0 0 3px rgba(234,179,8,0.35) inset"
+                            ? "0 0 0 3px rgba(254,240,138,0.35) inset"
                             : undefined,
                           transform: votedPending ? "translateY(1px)" : undefined,
                           transition: "all .12s ease",
@@ -2118,7 +2455,7 @@ return (
                             </div>
 
                             {/* 投票開始メッセージ */}
-                            {activeVote?.modalOpen && (
+                            {(activeVote?.phase === "voting" || activeVote?.phase === "finalizing") && (
                               <div
                                 style={{
                                   position: "absolute",
@@ -2178,12 +2515,17 @@ return (
                                   onClick={() => {
                                     console.log('No button clicked:', { 
                                       hasVoted, 
-                                      activeVote: activeVote?.modalOpen, 
+                                      activeVote: activeVote?.phase, 
                                       cardId: activeVote?.cardId, 
                                       modalCardId: cardModal.id 
                                     });
                                     if (!hasVoted) {
-                                      if (activeVote?.modalOpen && activeVote.cardId === cardModal.id) {
+                                      // 指示書④: 既に投票中なら castVote、そうでなければ startVote
+                                      if (
+                                        activeVote?.phase === "voting" &&
+                                        activeVote?.sessionId &&
+                                        activeVote?.cardId === cardModal.id
+                                      ) {
                                         castVote("no");
                                       } else {
                                         startVote("no", cardModal.id);
@@ -2194,18 +2536,6 @@ return (
                                 >
                                 行かない
                               </button>
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: -12,
-                                  right: -12,
-                                  display: "flex",
-                                  zIndex: 5,
-                                  pointerEvents: "none",
-                                }}
-                              >
-                                {renderVoteAvatars("no")}
-                              </div>
                             </div>
 
                             <div style={{ position: "relative" }}>
@@ -2215,12 +2545,17 @@ return (
                                 onClick={() => {
                                   console.log('Pending button clicked:', { 
                                     hasVoted, 
-                                    activeVote: activeVote?.modalOpen, 
+                                    activeVote: activeVote?.phase, 
                                     cardId: activeVote?.cardId, 
                                     modalCardId: cardModal.id 
                                   });
                                   if (!hasVoted) {
-                                    if (activeVote?.modalOpen && activeVote.cardId === cardModal.id) {
+                                    // 指示書④: 既に投票中なら castVote、そうでなければ startVote
+                                    if (
+                                      activeVote?.phase === "voting" &&
+                                      activeVote?.sessionId &&
+                                      activeVote?.cardId === cardModal.id
+                                    ) {
                                       castVote("pending");
                                     } else {
                                       startVote("pending", cardModal.id);
@@ -2231,18 +2566,6 @@ return (
                               >
                                 保留
                               </button>
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: -12,
-                                  right: -12,
-                                  display: "flex",
-                                  zIndex: 5,
-                                  pointerEvents: "none",
-                                }}
-                              >
-                                {renderVoteAvatars("pending")}
-                              </div>
                             </div>
 
                             <div style={{ position: "relative" }}>
@@ -2252,12 +2575,17 @@ return (
                                 onClick={() => {
                                   console.log('Go button clicked:', { 
                                     hasVoted, 
-                                    activeVote: activeVote?.modalOpen, 
+                                    activeVote: activeVote?.phase, 
                                     cardId: activeVote?.cardId, 
                                     modalCardId: cardModal.id 
                                   });
                                   if (!hasVoted) {
-                                    if (activeVote?.modalOpen && activeVote.cardId === cardModal.id) {
+                                    // 指示書④: 既に投票中なら castVote、そうでなければ startVote
+                                    if (
+                                      activeVote?.phase === "voting" &&
+                                      activeVote?.sessionId &&
+                                      activeVote?.cardId === cardModal.id
+                                    ) {
                                       castVote("go");
                                     } else {
                                       startVote("go", cardModal.id);
@@ -2268,22 +2596,67 @@ return (
                               >
                                 行く
                               </button>
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: -12,
-                                  right: -12,
-                                  display: "flex",
-                                  zIndex: 5,
-                                  pointerEvents: "none",
-                                }}
-                              >
-                                {renderVoteAvatars("go")}
-                              </div>
                             </div>
                             </>
                             );
                             })()}
+                            
+                            {/* 投票キャンセルボタン（投票開始者のみ表示） */}
+                            {activeVote?.phase === "voting" && activeVote.startedBy === myUserId && (
+                              <div style={{ marginTop: 16, textAlign: "center" }}>
+                                <button
+                                  onClick={async () => {
+                                    if (!roomId || typeof roomId !== "string" || !activeVote?.sessionId) return;
+                                    // 投票を強制終了（phase: idle に戻す）
+                                    await setDoc(
+                                      doc(db, "rooms", roomId, "play3State", "state"),
+                                      {
+                                        phase: "idle" as VotePhase,
+                                        cardId: null,
+                                        sessionId: null,
+                                        round: null,
+                                        expectedUserIds: [],
+                                        updatedAt: serverTimestamp(),
+                                        // 後方互換
+                                        modalOpen: false,
+                                        initiatedById: null,
+                                        initiatedByName: null,
+                                      },
+                                      { merge: true }
+                                    );
+                                    // セッションドキュメントも削除またはcancelled状態に
+                                    await setDoc(
+                                      doc(db, "rooms", roomId, PLAY3_VOTE_SESSIONS, activeVote.sessionId),
+                                      {
+                                        phase: "idle" as VotePhase,
+                                        cancelled: true,
+                                        cancelledAt: Date.now(),
+                                        updatedAt: serverTimestamp(),
+                                      },
+                                      { merge: true }
+                                    );
+                                    setUiLocked(false);
+                                    setUiLockReason(null);
+                                    setMyVoteChoice(null);
+                                    setVoteMap({});
+                                    closeCard();
+                                  }}
+                                  style={{
+                                    padding: "8px 20px",
+                                    background: "#ef4444",
+                                    color: "#fff",
+                                    border: "none",
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                    boxShadow: "0 2px 8px rgba(239, 68, 68, 0.3)",
+                                  }}
+                                >
+                                  投票をキャンセル
+                                </button>
+                              </div>
+                            )}
                           </>
                         );
                       })()}
@@ -2310,11 +2683,24 @@ return (
           disabled={vsSorted.length > 0 || uiLocked}
           onClick={async () => {
             if (!roomId || typeof roomId !== "string" || !myUserId) return;
+            
+            console.log('終了ボタン押下:', { 
+              roomId, 
+              myUserId, 
+              normalizedUserName,
+              vsSortedLength: vsSorted.length,
+              uiLocked,
+              vsIds 
+            });
+            
+            // play3Result コレクションに書き込み（ドキュメントIDはparticipantのID）
             await setDoc(
-              doc(db, "rooms", roomId, "play3Ready", myUserId),
+              doc(db, "rooms", roomId, "play3Result", myUserId),
               {
                 userId: myUserId,
+                userName: normalizedUserName || userName,
                 ready: true,
+                completed: true,
                 updatedAt: serverTimestamp(),
               },
               { merge: true }
@@ -2333,8 +2719,16 @@ return (
             boxShadow: "0 10px 28px -8px rgba(37,99,235,0.55)",
             cursor: vsSorted.length > 0 || uiLocked ? "not-allowed" : "pointer",
           }}
+          title={
+            vsSorted.length > 0 
+              ? `VSカードが${vsSorted.length}枚残っています。先に決定してください。` 
+              : uiLocked 
+              ? "既に終了ボタンを押しました。他の参加者を待っています。" 
+              : "クリックして結果ページに進む"
+          }
         >
           終了して結果を見る
+          {vsSorted.length > 0 && ` (VS: ${vsSorted.length}枚)`}
         </button>
       </div>
 
@@ -2387,6 +2781,192 @@ return (
             </div>
           );
         })()}
+
+      {/* 投票結果表示モーダル */}
+      {(() => {
+        console.log('投票結果モーダル表示チェック:', { voteResultModal });
+        return voteResultModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            backdropFilter: "blur(4px)",
+            zIndex: 300,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "auto",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 20,
+              padding: "40px 32px",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+              maxWidth: 500,
+              width: "90%",
+              textAlign: "center",
+            }}
+          >
+            <div style={{ fontSize: 48, marginBottom: 16 }}>🎉</div>
+            <div
+              style={{
+                fontSize: 24,
+                fontWeight: 900,
+                color: "#111827",
+                marginBottom: 24,
+                lineHeight: 1.4,
+              }}
+            >
+              「{voteResultModal.cardName}」が<br />
+              「{voteResultModal.area}」に決定しました！
+            </div>
+            <div
+              style={{
+                fontSize: 16,
+                color: "#6b7280",
+                marginBottom: 32,
+                fontWeight: 600,
+              }}
+            >
+              カードが移動しました
+            </div>
+            <button
+              onClick={async () => {
+                setVoteResultModal(null);
+                // Firestoreから投票結果を削除
+                if (roomId && typeof roomId === "string") {
+                  await setDoc(
+                    doc(db, "rooms", roomId, "play3State", "state"),
+                    {
+                      voteResult: null,
+                    },
+                    { merge: true }
+                  );
+                }
+              }}
+              style={{
+                padding: "14px 32px",
+                background: "linear-gradient(135deg, #3b82f6, #2563eb)",
+                color: "#fff",
+                border: "none",
+                borderRadius: 12,
+                fontSize: 16,
+                fontWeight: 800,
+                cursor: "pointer",
+                boxShadow: "0 4px 12px rgba(59, 130, 246, 0.4)",
+                transition: "all 0.2s",
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.transform = "translateY(-2px)";
+                e.currentTarget.style.boxShadow = "0 6px 16px rgba(59, 130, 246, 0.5)";
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 4px 12px rgba(59, 130, 246, 0.4)";
+              }}
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* 参加者情報モーダル（result/page同様） */}
+      {activeUserInfo && (() => {
+        const user = displayParticipants.find(p => p.id === activeUserInfo);
+        if (!user) return null;
+        
+        // ユーザーのcategories情報を取得
+        const userSelection = selections.find(s => s.userId === activeUserInfo);
+        
+        return (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 100,
+            }}
+            onClick={() => setActiveUserInfo(null)}
+          >
+            <div
+              style={{
+                width: 420,
+                background: "#fff",
+                borderRadius: 12,
+                padding: 16,
+                boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>
+                {user.name}
+              </div>
+              <div style={{ color: "#374151", marginBottom: 10 }}>
+                プラン名：<strong style={{ color: "#2563eb" }}>
+                  {userSelection?.planName || "—"}
+                </strong>
+              </div>
+              
+              {/* カテゴリ別表示 */}
+              <div style={{ display: "grid", gap: 8 }}>
+                {[
+                  { key: "veryWant", label: "特に行きたい", color: "#fecaca", border: "#fca5a5" },
+                  { key: "want", label: "行きたい", color: "#fce7f3", border: "#fbcfe8" },
+                  { key: "neutral", label: "どちらでもいい", color: "#e5e7eb", border: "#d1d5db" },
+                  { key: "dont", label: "行きたくない", color: "#bae6fd", border: "#93c5fd" },
+                  { key: "veryDont", label: "特に行きたくない", color: "#93c5fd", border: "#60a5fa" },
+                ].map(({ key, label, color, border }) => {
+                  // userSelectionのcategoriesから該当カテゴリを取得
+                  const list = userSelection?.categories?.[key as keyof typeof userSelection.categories] || [];
+                  const count = Array.isArray(list) ? list.length : 0;
+                  
+                  return (
+                    <div
+                      key={key}
+                      style={{
+                        border: `1px solid ${border}`,
+                        borderRadius: 10,
+                        background: color,
+                        padding: "8px 10px",
+                      }}
+                    >
+                      <div style={{ fontWeight: 700 }}>
+                        {label}: <strong>{count}</strong>枚
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              
+              <div style={{ textAlign: "right", marginTop: 12 }}>
+                <button
+                  onClick={() => setActiveUserInfo(null)}
+                  style={{
+                    padding: "8px 12px",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 8,
+                    background: "#fff",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      <MapButton />
     </div>
   );
 }

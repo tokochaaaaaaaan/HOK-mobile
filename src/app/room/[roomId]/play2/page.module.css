@@ -1,0 +1,547 @@
+/* メインコンテナ - フルスクリーン */
+.container {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  box-sizing: border-box;
+  background-color: #f9fafb;
+  overflow: hidden;
+}
+
+/* タイトル */
+.title {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #1f2937;
+  text-align: center;
+  margin-bottom: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* フィルターボタン */
+.filterButtons {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  flex-shrink: 0;
+}
+
+.filterButton {
+  padding: 0.6rem 1.2rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border: 2px solid #d1d5db;
+  border-radius: 0.5rem;
+  background-color: #fff;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filterButton:hover {
+  background-color: #f3f4f6;
+}
+
+.filterButton.active {
+  background-color: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+/* カードエリア全体のコンテナ */
+.cardArea {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow: hidden;
+  padding-bottom: 5rem;
+}
+
+/* メインカードリストのコンテナ */
+.cardListContainer {
+  flex: 1.2;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+}
+/* 横スクロールラッパー */
+.scrollWrapper {
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 1rem 0 3rem;
+  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* カード一覧（横並び） */
+.cardList {
+  display: flex;
+  gap: 1rem;
+  height: 100%;
+  align-items: flex-start;
+  padding: 0.75rem 1rem;
+  min-height: 240px;
+}
+/* 個別カード */
+.card {
+  flex: 0 0 auto;
+  width: 150px;
+  height: auto;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
+  background: white;
+  border: 1px solid #ccc;
+  display: flex;
+  flex-direction: column;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.card img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.cardImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 全て見るボタン */
+.viewAllButton {
+  position: absolute;
+  bottom: 0.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  flex-shrink: 0;
+  padding: 0.25rem 0.5rem;
+  background: none;
+  color: #007bff;
+  border: none;
+  border-radius: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
+  text-decoration: underline;
+}
+
+.viewAllButton:hover {
+  color: #0056b3;
+}
+
+/* ライブラリセクション */
+.librarySection {
+  flex: 0 0 auto;
+  min-height: 150px;
+  max-height: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border-radius: 12px;
+}
+
+.libraryTitle {
+  font-size: 1rem;
+  font-weight: bold;
+  color: #374151;
+  flex-shrink: 0;
+  margin: 0 0 0.25rem 0;
+  order: 1;
+}
+
+.libraryScrollWrapper {
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5rem 0;
+  order: 2;
+  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.libraryList {
+  display: flex;
+  gap: 0.75rem;
+  height: 100%;
+  align-items: flex-start;
+  padding: 0.5rem;
+  min-height: 120px;
+}
+
+.libraryCard {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100px;
+  height: auto;
+  border-radius: 0.5rem;
+  overflow: visible;
+  cursor: pointer;
+  transition: transform 0.2s;
+  background: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.libraryCard:hover {
+  transform: translateY(-2px);
+}
+
+/* モーダル共通スタイル */
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+  padding: 1rem;
+  box-sizing: border-box;
+}
+
+.modal {
+  background-color: #f5f5f5;
+  border-radius: 1rem;
+  padding: 2rem;
+  max-width: 90%;
+  max-height: 80%;
+  overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* 全て見るモーダル */
+.allCardsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 1rem;
+  max-width: 600px;
+}
+
+.allCardsGrid .card {
+  width: 100%;
+  height: auto;
+}
+
+.allCardsGrid .card img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.allCardsGrid .cardTitle {
+  padding: 4px;
+  text-align: center;
+  font-size: 0.75rem;
+}
+
+/* 理由入力モーダル */
+.reasonModal {
+  position: relative;
+  width: 90vw;
+  max-width: 900px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.reasonModalTitle {
+  font-size: 1.25rem;
+  font-weight: bold;
+  margin-bottom: 1.5rem;
+  text-align: center;
+  color: #1f2937;
+  flex-shrink: 0;
+}
+
+.cardPreview {
+  width: 140px;
+  height: auto;
+  margin: 1rem auto;
+  cursor: pointer;
+  position: relative;
+}
+
+.cardPreviewInner {
+  position: relative;
+  width: 100%;
+  height: auto;
+  transform-style: preserve-3d;
+  transition: transform 0.6s;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.cardPreviewInner.flipped {
+  transform: rotateY(180deg);
+}
+
+.cardFace {
+  width: 100%;
+  backface-visibility: hidden;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.cardFace img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+
+.cardBack {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotateY(180deg);
+}
+
+.flipIndicator {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  width: 40px;
+  height: 40px;
+  background-color: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.rotateIcon {
+  width: 24px;
+  height: 24px;
+}
+
+/* アイコン選択エリア */
+.iconSection {
+  margin-bottom: 1.5rem;
+}
+
+.iconSectionTitle {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: #374151;
+}
+
+.iconGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.5rem;
+}
+
+.iconButton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  height: 60px;
+}
+
+.iconButton:hover {
+  background-color: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.iconButton.selected {
+  background-color: #dbeafe;
+  border-color: #3b82f6;
+}
+
+.iconEmoji {
+  font-size: 32px;
+  line-height: 1;
+}
+
+/* テキストエリア */
+.textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 0.75rem;
+  border: 2px solid #d1d5db;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.textarea::placeholder {
+  color: #9ca3af;
+  opacity: 1;
+  font-size: 1rem;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+/* モーダルボタン */
+.modalButtons {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.button {
+  padding: 0.75rem 2rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.buttonCancel {
+  background-color: #e5e7eb;
+  color: #374151;
+}
+
+.buttonCancel:hover {
+  background-color: #d1d5db;
+}
+
+.buttonConfirm {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.buttonConfirm:hover {
+  background-color: #2563eb;
+}
+
+.buttonClose {
+  width: auto;
+  padding: 0.75rem 1.5rem;
+  background-color: #6b7280;
+  color: white;
+  margin: 0 auto;
+  display: block;
+}
+
+.buttonClose:hover {
+  background-color: #4b5563;
+}
+
+/* 理由表示エリア */
+.reasonDisplay {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.35rem 0.5rem;
+  background-color: rgba(0, 0, 0, 0.85);
+  border-radius: 0.375rem;
+  max-width: 142px; /* カードの横幅(150px)よりやや小さめに設定 */
+  width: max-content; /* コンテンツに応じて幅を調整 */
+  box-sizing: border-box;
+}
+
+.reasonEmoji {
+  font-size: 0.85rem;
+  flex-shrink: 0;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+.reasonText {
+  font-size: 0.65rem;
+  color: #ffffff;
+  line-height: 1.3;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  white-space: normal;
+  flex: 1;
+  min-width: 0;
+  max-width: 110px; /* 絵文字分を考慮した最大幅 */
+}
+
+/* 空状態メッセージ */
+.emptyMessage {
+  text-align: center;
+  color: #6b7280;
+  font-size: 1rem;
+  padding: 2rem;
+}
+
+/* 次へボタン */
+.nextButton {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1rem 2rem;
+  font-size: 1.25rem;
+  font-weight: bold;
+  background-color: #10b981;
+  color: white;
+  border: none;
+  border-radius: 0.75rem;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  transition: all 0.2s;
+  z-index: 50;
+}
+
+.nextButton:hover {
+  background-color: #059669;
+  transform: translateX(-50%) translateY(-2px);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+}
+
+.nextButton:disabled {
+  background-color: #9ca3af;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.nextButton:disabled:hover {
+  transform: translateX(-50%);
+}

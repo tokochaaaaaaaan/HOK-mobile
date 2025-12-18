@@ -25,4 +25,8 @@ export const storage = getStorage(app);        // Storage - ファイル保存
 export const auth = getAuth(app);              // Authentication - ユーザー認証
 export const functions = getFunctions(app);    // Functions - サーバーサイド処理
 
+// 注: Firestore persistence を無効にしています
+// 理由: 複数タブ・複数リロード時に IndexedDB ロック競合が発生するため
+// リアルタイムの onSnapshot により常に最新データを取得するので問題なし
+
 export default app;

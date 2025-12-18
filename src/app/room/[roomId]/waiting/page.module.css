@@ -1,0 +1,197 @@
+/* 理由入力モーダル */
+.reasonModal {
+  position: relative;
+  width: 90vw;
+  max-width: 900px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.reasonModalTitle {
+  font-size: 1.25rem;
+  font-weight: bold;
+  margin-bottom: 1.5rem;
+  text-align: center;
+  color: #1f2937;
+  flex-shrink: 0;
+}
+
+.cardPreview {
+  width: 140px;
+  height: auto;
+  margin: 1rem auto;
+  cursor: pointer;
+  position: relative;
+}
+
+.cardPreviewInner {
+  position: relative;
+  width: 100%;
+  height: auto;
+  transform-style: preserve-3d;
+  transition: transform 0.6s;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.cardPreviewInner.flipped {
+  transform: rotateY(180deg);
+}
+
+.cardFace {
+  width: 100%;
+  backface-visibility: hidden;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.cardFace img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+
+.cardBack {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotateY(180deg);
+}
+
+.flipIndicator {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  width: 40px;
+  height: 40px;
+  background-color: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  pointer-events: none;
+}
+
+.rotateIcon {
+  width: 24px;
+  height: 24px;
+}
+
+/* アイコン選択エリア */
+.iconSection {
+  margin-bottom: 1.5rem;
+}
+
+.iconSectionTitle {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: #374151;
+}
+
+.iconGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.iconButton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  height: 60px;
+}
+
+.iconButton:hover {
+  background-color: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.iconButton.selected {
+  background-color: #dbeafe;
+  border-color: #3b82f6;
+}
+
+.iconEmoji {
+  font-size: 32px;
+  line-height: 1;
+}
+
+/* テキストエリア */
+.textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 0.75rem;
+  border: 2px solid #d1d5db;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.textarea::placeholder {
+  color: #9ca3af;
+  opacity: 1;
+  font-size: 1rem;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+/* モーダルボタン */
+.modalButtons {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  flex-shrink: 0;
+}
+
+.button {
+  padding: 0.75rem 2rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.buttonCancel {
+  background-color: #e5e7eb;
+  color: #374151;
+}
+
+.buttonCancel:hover {
+  background-color: #d1d5db;
+}
+
+.buttonConfirm {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.buttonConfirm:hover {
+  background-color: #2563eb;
+}

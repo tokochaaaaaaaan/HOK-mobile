@@ -13,6 +13,8 @@ import {
   query,
 } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
+import MapButton from "@/components/MapButton";
+import styles from "./page.module.css";
 
 // ============================================================
 // waiting/page.tsx – クリック移動＋理由モーダル＆確認ウィンドウ 完全版
@@ -99,18 +101,18 @@ const CAT_COLORS: Record<
 };
 
 const reasonIcons = [
-  { key: "gourmet", src: "/emoji/gourmet.svg", emoji: "🍴", text: "ご当地グルメ" },
-  { key: "thrill", src: "/emoji/thrill.svg", emoji: "🎢", text: "スリル" },
-  { key: "experience", src: "/emoji/experience.svg", emoji: "🏃", text: "体験" },
-  { key: "shopping", src: "/emoji/shopping.svg", emoji: "🛍", text: "買い物" },
-  { key: "design", src: "/emoji/design.svg", emoji: "🖼", text: "建築・デザイン" },
-  { key: "scenery", src: "/emoji/scenery.svg", emoji: "🏞", text: "景色" },
-  { key: "time", src: "/emoji/time.svg", emoji: "⏱", text: "時間" },
-  { key: "cost", src: "/emoji/cost.svg", emoji: "💰", text: "コスパ" },
-  { key: "friends", src: "/emoji/friends.svg", emoji: "🤝", text: "友達と一緒に" },
-  { key: "family", src: "/emoji/family.svg", emoji: "👪", text: "家族向け" },
-  { key: "relax", src: "/emoji/relax.svg", emoji: "🧘", text: "リラックス" },
-  { key: "other", src: "/emoji/other.svg", emoji: "❗", text: "その他" }
+  { key: "gourmet", src: "/emoji/gourmet.svg", emoji: "🍽️", text: "食", fullText: "食事" },
+  { key: "thrill", src: "/emoji/thrill.svg", emoji: "🎢", text: "激", fullText: "スリル" },
+  { key: "experience", src: "/emoji/experience.svg", emoji: "🎯", text: "体", fullText: "体験" },
+  { key: "shopping", src: "/emoji/shopping.svg", emoji: "🛍️", text: "買", fullText: "買い物" },
+  { key: "design", src: "/emoji/design.svg", emoji: "🏛️", text: "建築", fullText: "建築・デザイン" },
+  { key: "scenery", src: "/emoji/scenery.svg", emoji: "🌅", text: "景", fullText: "景色" },
+  { key: "time", src: "/emoji/time.svg", emoji: "⏰", text: "時", fullText: "時間" },
+  { key: "cost", src: "/emoji/cost.svg", emoji: "💰", text: "¥", fullText: "コスパ" },
+  { key: "friends", src: "/emoji/friends.svg", emoji: "👥", text: "友", fullText: "友達と一緒に" },
+  { key: "family", src: "/emoji/family.svg", emoji: "👨‍👩‍👧‍👦", text: "家", fullText: "家族向け" },
+  { key: "relax", src: "/emoji/relax.svg", emoji: "🧘", text: "休", fullText: "リラックス" },
+  { key: "other", src: "/emoji/other.svg", emoji: "❗", text: "他", fullText: "その他" }
 ];
 
 function sortByIdNumber(a: { id: string }, b: { id: string }) {
@@ -148,13 +150,56 @@ export default function WaitingPage() {
   const roomId = (params?.roomId as string) || "";
 
   // 40枚のカード定義（USJ画像スキーマに合わせ）
+  const cardTitles = [
+    "ジョーズ",
+    "アミティ・ボードウォーク・ゲーム",
+    "ウォーターワールド",
+    "ザ・ドラゴン・パール",
+    "ロンバーズ・ランディング",
+    "ロストワールド・レストラン",
+    "ジュラシック・パーク・ダイナソー・ミート&グリート",
+    "ザ・フライング・ダイナソー",
+    "名探偵コナン 4-D ライブ・ショー ~星空の宝石(ジュエル)~",
+    "クロミ・ライブ",
+    "パークサイド・グリル",
+    "SAIDO",
+    "デリシャス・ミー！ザ・クッキー・キッチン",
+    "スペース・キラー",
+    "ミニオン・ハチャメチャ・アイス",
+    "ミニオン・ハチャメチャ・ライド",
+    "マリオカート ~クッパの挑戦状~",
+    "ヨッシー・アドベンチャー",
+    "キノピオカフェ",
+    "ピットストップ・ポップコーン",
+    "三本の箒",
+    "オリバンダーの店",
+    "ハリー・ポッター・アンド・ザ・フォービドゥン・ジャーニー",
+    "フライト・オブ・ザ・ヒッポグリフ",
+    "ハリウッド・ドリーム・ザ・ライド",
+    "プレイング・ウィズおさるのジョージ",
+    "シング・オン・ツアー",
+    "スタジオ・スターズ・レストラン",
+    "ビバリーヒルズ・ブランジェリー",
+    "鬼滅の刃 XRライド ~刀鍛冶の里を疾走せよ~",
+    "ハローキティのコーナーカフェ",
+    "スヌーピー・バックロット・カフェ",
+    "ハローキティのリボン・コレクション",
+    "エルモのゴーゴー・スケートボード",
+    "エルモのバブル・バブル",
+    "エルモのリトル・ドライブ",
+    "ハローキティのカップケーキ・ドリーム",
+    "ビッグバードのビッグトップ・サーカス",
+    "フライング・スヌーピー",
+    "モッピーのバルーン・トリップ",
+  ];
+
   const allCards: CardInfo[] = useMemo(
     () =>
       Array.from({ length: 40 }, (_, i) => {
         const idx = i + 1;
         return {
           id: `card${idx}`,
-          title: `カード${idx}`,
+          title: cardTitles[i],
           src: `/pngs/USJ_${idx}_surface-1.png`,
           backSrc: `/pngs/back/USJ_${idx}_back-1.png`,
         } as CardInfo;
@@ -342,13 +387,18 @@ export default function WaitingPage() {
         const enhanceCategory = (category: CardWithReason[]) => {
           return category.map(card => {
             const fullCardInfo = allCards.find(c => c.id === card.id);
-            return {
+            const baseCard = {
               id: card.id,
               title: fullCardInfo?.title || card.title || `カード${card.id.replace('card', '')}`,
               src: fullCardInfo?.src || card.src || `/pngs/USJ_${card.id.replace('card', '')}_surface-1.png`,
               backSrc: fullCardInfo?.backSrc || card.backSrc || `/pngs/back/USJ_${card.id.replace('card', '')}_back-1.png`,
-              reason: card.reason || ""
             };
+            
+            // 理由がある場合のみreasonプロパティを追加
+            if (card.reason && card.reason.trim()) {
+              return { ...baseCard, reason: card.reason };
+            }
+            return baseCard;
           });
         };
 
@@ -369,6 +419,23 @@ export default function WaitingPage() {
           planname: planName || "",
           planName: planName || "", // 両方の形式で保存
           updatedAt: serverTimestamp(),
+          lastModified: new Date().toISOString(), // クライアント側のタイムスタンプも保存
+          // 実験データ用の旧形式も保存（小文字）
+          verywant: enhancedNext.veryWant,
+          verydont: enhancedNext.veryDont,
+          want: enhancedNext.want.map(c => c.id),
+          neutral: enhancedNext.neutral.map(c => c.id),
+          dont: enhancedNext.dont.map(c => c.id),
+          // 理由も別途保存
+          reasons: (() => {
+            const reasonsMap: Record<string, string> = {};
+            [...enhancedNext.veryWant, ...enhancedNext.veryDont].forEach((card: any) => {
+              if (card.reason && card.reason.trim()) {
+                reasonsMap[card.id] = card.reason;
+              }
+            });
+            return reasonsMap;
+          })(),
         }, { merge: true });
         
         console.log('Categories saved successfully:', enhancedNext);
@@ -488,9 +555,16 @@ export default function WaitingPage() {
 
       // 3) 通常移動
       const base = removeFromCategory(card.id, picked.from, categories);
-      // 理由は通常カテゴリでは不要
-      const { reason, ...rest } = card as any;
-      const next = addToCategory(rest, target, base);
+      // 理由は通常カテゴリでは不要なので必ず除去
+      // allCardsから元の情報を取得して、理由なしの新しいオブジェクトを作成
+      const fullCardInfo = allCards.find(c => c.id === card.id);
+      const movedCard: CardInfo = {
+        id: card.id,
+        title: fullCardInfo?.title || card.title,
+        src: fullCardInfo?.src || card.src,
+        backSrc: fullCardInfo?.backSrc || card.backSrc,
+      };
+      const next = addToCategory(movedCard, target, base);
       const normalized = normalizeCategories(next);
       setCategories(normalized);
       saveCategories(normalized);
@@ -504,14 +578,50 @@ export default function WaitingPage() {
     (cardId: string, category: CategoryType, from: CategoryType) => {
       const c = getCategoryArray(category).find((x) => x.id === cardId);
       if (!c) return;
+      
+      const existingReason = c.reason || "";
+      let selectedIcon: number | null = null;
+      let customReason = "";
+      
+      if (existingReason) {
+        // 既存の理由を解析
+        // "アイコンのfullText:カスタムテキスト" の形式かチェック
+        const colonIndex = existingReason.indexOf(':');
+        
+        if (colonIndex !== -1) {
+          // コロンが含まれている場合、前半がアイコンのfullText、後半がカスタムテキスト
+          const iconPart = existingReason.substring(0, colonIndex);
+          const customPart = existingReason.substring(colonIndex + 1);
+          
+          const iconIndex = reasonIcons.findIndex(icon => icon.fullText === iconPart);
+          if (iconIndex >= 0) {
+            selectedIcon = iconIndex;
+            customReason = customPart;
+          } else {
+            // アイコンが見つからない場合は全体をカスタムテキストとして扱う
+            customReason = existingReason;
+          }
+        } else {
+          // コロンがない場合、アイコンのfullTextと一致するかチェック
+          const iconIndex = reasonIcons.findIndex(icon => icon.fullText === existingReason);
+          if (iconIndex >= 0) {
+            selectedIcon = iconIndex;
+            customReason = "";
+          } else {
+            // アイコンでもない場合はカスタムテキストとして扱う
+            customReason = existingReason;
+          }
+        }
+      }
+      
       setReasonModal({
         isOpen: true,
         card: { ...c },
         category,
         from,
         originalFrom: null, // 既存編集は移動が伴わないので復元不要
-        selectedIcon: null,
-        customReason: c.reason || "",
+        selectedIcon,
+        customReason,
         flipped: false,
       });
     },
@@ -551,10 +661,24 @@ export default function WaitingPage() {
     const { card, category, selectedIcon, customReason } = reasonModal;
     if (!card || !category) return closeReasonModal();
 
-    const reasonText = (() => {
-      if (selectedIcon !== null) return reasonIcons[selectedIcon].text;
-      return (customReason || "").trim();
-    })();
+    let finalReason = "";
+    
+    if (selectedIcon !== null) {
+      // アイコンが選択されている場合
+      const iconText = reasonIcons[selectedIcon].fullText;
+      const customText = customReason.trim();
+      
+      if (customText) {
+        // カスタムテキストがある場合: アイコンのfullText + カスタムテキスト
+        finalReason = `${iconText}:${customText}`;
+      } else {
+        // カスタムテキストがない場合: アイコンのfullTextのみ
+        finalReason = iconText;
+      }
+    } else {
+      // アイコンが選択されていない場合: カスタムテキストのみ
+      finalReason = customReason.trim();
+    }
 
     // カードの完全な情報を保持
     const fullCardInfo = allCards.find(c => c.id === card.id);
@@ -563,7 +687,7 @@ export default function WaitingPage() {
       title: fullCardInfo?.title || card.title || `カード${card.id.replace('card', '')}`,
       src: fullCardInfo?.src || card.src || `/pngs/USJ_${card.id.replace('card', '')}_surface-1.png`,
       backSrc: fullCardInfo?.backSrc || card.backSrc || `/pngs/back/USJ_${card.id.replace('card', '')}_back-1.png`,
-      reason: reasonText,
+      reason: finalReason,
     };
 
     const base = removeFromCategory(card.id, category, categories);
@@ -618,9 +742,34 @@ export default function WaitingPage() {
       startPick(card, category);
     };
 
-    const displayReason = card.reason || "";
-    const reasonIcon = reasonIcons.find((r) => r.text === displayReason);
-    const badgeText = reasonIcon ? `${reasonIcon.emoji} ${reasonIcon.text}` : displayReason;
+    // 理由を解析してアイコンとテキストを分離
+    const reason = card.reason || "";
+    let displayEmoji = "";
+    let displayText = reason;
+    
+    if (reason) {
+      const colonIndex = reason.indexOf(':');
+      if (colonIndex !== -1) {
+        const iconPart = reason.substring(0, colonIndex);
+        const customPart = reason.substring(colonIndex + 1);
+        const reasonIcon = reasonIcons.find(icon => icon.fullText === iconPart);
+        
+        if (reasonIcon) {
+          displayEmoji = reasonIcon.emoji;
+          displayText = customPart;
+        } else {
+          displayText = reason;
+        }
+      } else {
+        const reasonIcon = reasonIcons.find(icon => icon.fullText === reason);
+        if (reasonIcon) {
+          displayEmoji = reasonIcon.emoji;
+          displayText = reasonIcon.fullText;
+        } else {
+          displayText = reason;
+        }
+      }
+    }
 
     return (
       <div
@@ -651,39 +800,30 @@ export default function WaitingPage() {
         }} />
         <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
           <div style={{ fontSize: ".9rem", fontWeight: 600 }}>{card.title}</div>
-          {(category === "veryWant" || category === "veryDont") && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (interactionLocked) return;
-                openReasonModal(card.id, category, category);
-              }}
-              title="理由を編集"
-              style={{
-                fontSize: 12,
-                padding: "2px 6px",
-                borderRadius: 6,
-                border: "1px solid #e5e7eb",
-                background: "#f9fafb",
-                color: "#374151",
-                cursor: interactionLocked ? "default" : "pointer",
-              }}
-            >理由</button>
-          )}
         </div>
-        {displayReason && (
+        {reason && (
           <div style={{ 
             marginTop: 4, 
-            fontSize: ".75rem", 
-            color: "#2563eb", 
+            fontSize: ".65rem", 
+            color: "#fff", 
             fontWeight: 500,
             lineHeight: 1.3,
-            background: "rgba(37, 99, 235, 0.08)",
+            backgroundColor: "rgba(0,0,0,0.85)",
             padding: "2px 6px",
             borderRadius: 4,
-            border: "1px solid rgba(37, 99, 235, 0.2)"
-          }}>
-            {badgeText}
+            display: "flex",
+            alignItems: "center",
+            gap: "2px",
+          }}
+          title={displayText}
+          >
+            {displayEmoji && <span style={{ fontSize: "0.8rem" }}>{displayEmoji}</span>}
+            <span style={{ 
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}>
+              {displayText}
+            </span>
           </div>
         )}
       </div>
@@ -751,20 +891,29 @@ export default function WaitingPage() {
   }
 
   // 進捗やハンドラ計算の前に、後段で使うコールバックを全て定義しておく（Hooks順序を安定化）
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  const handleFinishClick = () => {
+    // 確認モーダルを表示
+    setShowConfirmModal(true);
+  };
+
   const markMatchReady = useCallback(async () => {
     if (!roomId || !userName) return;
     if (selfReady || isSaving) return;
     try {
       setIsSaving(true);
-      // finalSelections を確定保存
+      // finalSelections を確定保存（merge: trueで既存データを保持）
       await setDoc(doc(db, "rooms", roomId, "finalSelections", userName), {
         user: userName,
         userId: userName,
         userName,
         categories,
         planname: planName || "",
+        planName: planName || "",  // 両方のフィールド名を保存
         isReady: true,
         updatedAt: serverTimestamp(),
+        timestamp: serverTimestamp(),
       }, { merge: true });
       // matchReady に登録
       await setDoc(doc(db, "rooms", roomId, "matchReady", userName), {
@@ -774,6 +923,7 @@ export default function WaitingPage() {
       }, { merge: true });
       setSelfReady(true);
       setInteractionLocked(true);
+      setShowConfirmModal(false);
     } finally {
       setIsSaving(false);
     }
@@ -825,7 +975,7 @@ export default function WaitingPage() {
           {/* 合致率ボタン */}
           <div style={{ marginTop: 14 }}>
             <button
-              onClick={markMatchReady}
+              onClick={handleFinishClick}
               disabled={selfReady || isSaving}
               style={{
                 padding: "12px 24px",
@@ -905,135 +1055,544 @@ export default function WaitingPage() {
         </div>
       )}
 
-      {/* 理由モーダル（play2準拠の簡易版） */}
-      {reasonModal.isOpen && (
+      {/* 理由モーダル（play2と完全に同じUI） */}
+      {reasonModal.isOpen && reasonModal.card && (
         <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3000 }}
+          style={{ 
+            position: "fixed", 
+            inset: 0, 
+            background: "rgba(0,0,0,0.5)", 
+            display: "flex", 
+            alignItems: "center", 
+            justifyContent: "center", 
+            zIndex: 3000 
+          }}
           onClick={(e) => { if (e.target === e.currentTarget) cancelReasonModal(); }}
         >
-          <div
-            style={{
-              width: "80%",
-              maxWidth: 800,
-              height: "80%",
-              background: "#fff",
-              borderRadius: 12,
-              padding: 24,
-              display: "flex",
-              flexDirection: "column",
-              boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
-            }}
-          >
-            {/* ヘッダー（play2と同じ文言） */}
-            <div style={{ textAlign: "center", marginBottom: 24, fontSize: "1.2rem", fontWeight: "bold" }}>
+          <div className={styles.reasonModal}>
+            {/* ヘッダー */}
+            <div className={styles.reasonModalTitle}>
               このカードを選んだ理由を選択・入力してください
             </div>
 
-            {/* メイン：左プレビュー / 右アイコン＋テキスト */}
+            {/* メインコンテンツ */}
             <div style={{ flex: 1, display: "flex", gap: 24 }}>
-              {/* 左：カードプレビュー */}
-              <div style={{ flex: "0 0 240px", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 12, paddingBottom: 12 }}>
-                <div
-                  style={{
-                    width: 180,
-                    height: 280,
-                    cursor: "pointer",
-                    borderRadius: 8,
-                    overflow: "hidden",
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                    marginTop: 12,
-                    marginBottom: 12,
-                  }}
-                  onClick={() => setReasonModal((p) => ({ ...p, flipped: !p.flipped }))}
-                >
-                  <img
-                    src={reasonModal.flipped ? reasonModal.card?.backSrc : reasonModal.card?.src}
-                    alt={reasonModal.card?.title || "card"}
-                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                  />
+              {/* 左側：カード表示 */}
+              <div style={{ flex: "0 0 240px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <div className={styles.cardPreview}>
+                  <div
+                    className={`${styles.cardPreviewInner} ${reasonModal.flipped ? styles.flipped : ""}`}
+                    onClick={() => setReasonModal((p) => ({ ...p, flipped: !p.flipped }))}
+                  >
+                    <div className={styles.cardFace}>
+                      <img
+                        src={reasonModal.card.src}
+                        alt={reasonModal.card.title}
+                      />
+                    </div>
+                    <div className={`${styles.cardFace} ${styles.cardBack}`}>
+                      <img
+                        src={reasonModal.card.backSrc}
+                        alt={reasonModal.card.title}
+                      />
+                    </div>
+                    {/* 回転インジケーター */}
+                    <div className={styles.flipIndicator}>
+                      <svg 
+                        className={styles.rotateIcon}
+                        viewBox="0 0 24 24" 
+                        fill="none" 
+                        stroke="#3b82f6" 
+                        strokeWidth="2.5"
+                        strokeLinecap="round" 
+                        strokeLinejoin="round"
+                      >
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                      </svg>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ marginTop: 12, fontSize: "1rem", fontWeight: "bold", textAlign: "center" }}>
-                  {reasonModal.card?.title}
+                <div style={{ fontSize: "1rem", fontWeight: "bold", textAlign: "center" }}>
+                  {reasonModal.card.title}
                 </div>
               </div>
 
-              {/* 右：アイコン選択 + テキスト */}
+              {/* 右側：アイコン選択 */}
               <div style={{ flex: 1 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12, marginBottom: 24 }}>
-                  {reasonIcons.map((icon, i) => (
+                <div className={styles.iconGrid}>
+                  {reasonIcons.map((icon, index) => (
                     <div
-                      key={icon.text}
-                      onClick={() => setReasonModal((p) => ({ ...p, selectedIcon: i, customReason: "" }))}
-                      style={{
-                        padding: 12,
-                        border: reasonModal.selectedIcon === i ? "3px solid #2196f3" : "1px solid #ddd",
-                        borderRadius: 8,
-                        cursor: "pointer",
-                        textAlign: "center",
-                        backgroundColor: reasonModal.selectedIcon === i ? "#e3f2fd" : "#fff",
-                        transition: "all .2s ease",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        height: 60,
+                      key={index}
+                      onClick={() => {
+                        setReasonModal(prev => ({ 
+                          ...prev, 
+                          selectedIcon: index,
+                          customReason: ""
+                        }));
                       }}
+                      className={`${styles.iconButton} ${reasonModal.selectedIcon === index ? styles.selected : ""}`}
+                      title={icon.fullText}
                     >
-                      <img src={icon.src} alt={icon.text} width={36} height={36} style={{ display: 'block' }} />
+                      <div className={styles.iconEmoji}>{icon.emoji}</div>
                     </div>
                   ))}
                 </div>
 
+                {/* テキストボックス */}
                 <textarea
                   value={reasonModal.customReason}
-                  onChange={(e) => setReasonModal((p) => ({ ...p, customReason: e.target.value, selectedIcon: null }))}
-                  placeholder={reasonModal.selectedIcon !== null ? reasonIcons[reasonModal.selectedIcon].text : "理由を記入して下さい"}
-                  style={{
-                    width: "100%",
-                    height: 80,
-                    padding: 12,
-                    fontSize: "1rem",
-                    border: "1px solid #ddd",
-                    borderRadius: 8,
-                    resize: "none",
-                    boxSizing: "border-box",
-                  }}
+                  onChange={(e) =>
+                    setReasonModal(prev => ({ 
+                      ...prev, 
+                      customReason: e.target.value
+                    }))
+                  }
+                  placeholder={
+                    reasonModal.selectedIcon !== null 
+                      ? reasonIcons[reasonModal.selectedIcon].fullText 
+                      : "理由を記入して下さい"
+                  }
+                  className={styles.textarea}
                 />
-                {/* 注意メッセージ */}
-                {(!reasonModal.customReason.trim() && reasonModal.selectedIcon === null) && (
-                  <div style={{ marginTop: 8, color: "#b91c1c", fontSize: ".9rem" }}>
-                    理由アイコンを選ぶか、自由記入を入力してください
-                  </div>
-                )}
               </div>
             </div>
 
             {/* フッター：ボタン */}
-            <div style={{ display: "flex", justifyContent: "center", gap: 16, marginTop: 24 }}>
+            <div className={styles.modalButtons}>
               <button
                 onClick={confirmReason}
-                disabled={!reasonModal.customReason.trim() && reasonModal.selectedIcon === null}
-                style={{
-                  padding: "12px 24px",
-                  fontSize: "1rem",
-                  backgroundColor: (!reasonModal.customReason.trim() && reasonModal.selectedIcon === null) ? "#9ca3af" : "#2196f3",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: (!reasonModal.customReason.trim() && reasonModal.selectedIcon === null) ? "not-allowed" : "pointer",
-                }}
+                className={`${styles.button} ${styles.buttonConfirm}`}
               >
                 決定
               </button>
               <button
                 onClick={cancelReasonModal}
+                className={`${styles.button} ${styles.buttonCancel}`}
+              >
+                戻る
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 最終確認モーダル (play2スタイル) */}
+      {showConfirmModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2000,
+            overflow: "hidden",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowConfirmModal(false);
+            }
+          }}
+        >
+          <div
+            style={{
+              width: "80%",
+              maxWidth: 600,
+              maxHeight: "90vh",
+              background: "#fff",
+              padding: 24,
+              borderRadius: 8,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* ヘッダー：ユーザー名とプラン名 */}
+            <div style={{ 
+              marginBottom: 20, 
+              padding: 16,
+              background: "#fff",
+              border: "2px solid #667eea",
+              borderRadius: 8,
+              flexShrink: 0
+            }}>
+              <div style={{ fontSize: "0.9rem", color: "#6b7280", marginBottom: 4 }}>
+                ユーザー名
+              </div>
+              <div style={{ fontSize: "1.3rem", fontWeight: "bold", marginBottom: 12, color: "#1f2937" }}>
+                {userName}
+              </div>
+              <div style={{ fontSize: "0.9rem", color: "#6b7280", marginBottom: 4 }}>
+                プラン名
+              </div>
+              <div style={{ fontSize: "1.3rem", fontWeight: "bold", color: "#1f2937" }}>
+                {planName || "未設定"}
+              </div>
+            </div>
+
+            <p style={{ marginBottom: 16, fontSize: "1.1rem", flexShrink: 0, textAlign: "center", fontWeight: 600 }}>
+              最後に選択内容を確認してください
+            </p>
+
+            {/* カード一覧 */}
+            <div 
+              style={{ 
+                textAlign: "left", 
+                flex: 1, 
+                minHeight: 0, 
+                overflowY: "auto",
+                marginBottom: 16,
+              }}
+              onWheel={(e) => e.stopPropagation()}
+              onTouchMove={(e) => e.stopPropagation()}
+            >
+              <h3 style={{ marginBottom: 20, textAlign: "center", fontSize: "1.2rem" }}>選択したカード一覧</h3>
+              
+              {/* 特に行きたいカード */}
+              <div style={{ marginBottom: 24 }}>
+                <strong style={{ 
+                  fontSize: "1.1rem", 
+                  color: "#ef4444",
+                  display: "block",
+                  marginBottom: 12,
+                  paddingBottom: 8,
+                  borderBottom: "2px solid #ef4444"
+                }}>
+                  特に行きたいカード
+                </strong>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                  {categories.veryWant.length === 0 ? (
+                    <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
+                  ) : (
+                    categories.veryWant.map((card) => (
+                      <div key={card.id} style={{ position: "relative", width: 80 }}>
+                        <img
+                          src={card.src}
+                          alt={card.title}
+                          style={{
+                            width: "100%",
+                            borderRadius: 4,
+                            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                            border: "2px solid #ef4444",
+                          }}
+                        />
+                        {card.reason && (
+                          <div style={{
+                            position: "absolute",
+                            bottom: 4,
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "0.25rem",
+                            padding: "0.35rem 0.5rem",
+                            backgroundColor: "rgba(0,0,0,0.85)",
+                            color: "#fff",
+                            borderRadius: "0.375rem",
+                            maxWidth: "76px",
+                            width: "max-content",
+                            boxSizing: "border-box",
+                          }}>
+                            {(() => {
+                              // 理由を解析: "fullText:customText" または "fullText" または "customText"
+                              const colonIndex = card.reason.indexOf(':');
+                              let displayText = card.reason;
+                              let emoji = "";
+                              
+                              if (colonIndex !== -1) {
+                                const iconPart = card.reason.substring(0, colonIndex);
+                                const customPart = card.reason.substring(colonIndex + 1);
+                                const icon = reasonIcons.find(ic => ic.fullText === iconPart);
+                                if (icon) {
+                                  emoji = icon.emoji;
+                                  displayText = customPart;
+                                } else {
+                                  displayText = card.reason;
+                                }
+                              } else {
+                                const icon = reasonIcons.find(ic => ic.fullText === card.reason);
+                                if (icon) {
+                                  emoji = icon.emoji;
+                                  displayText = icon.fullText;
+                                }
+                              }
+                              
+                              return (
+                                <>
+                                  {emoji && (
+                                    <span style={{ 
+                                      fontSize: "0.85rem", 
+                                      flexShrink: 0, 
+                                      lineHeight: 1, 
+                                      marginTop: "1px" 
+                                    }}>
+                                      {emoji}
+                                    </span>
+                                  )}
+                                  <span style={{
+                                    fontSize: "0.65rem",
+                                    lineHeight: 1.3,
+                                    wordWrap: "break-word",
+                                    overflowWrap: "break-word",
+                                    wordBreak: "break-word",
+                                    whiteSpace: "normal",
+                                    flex: 1,
+                                    minWidth: 0,
+                                  }}>
+                                    {displayText}
+                                  </span>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* 行きたいカード */}
+              <div style={{ marginBottom: 24 }}>
+                <strong style={{ 
+                  fontSize: "1.1rem", 
+                  color: "#ec4899",
+                  display: "block",
+                  marginBottom: 12,
+                  paddingBottom: 8,
+                  borderBottom: "2px solid #ec4899"
+                }}>
+                  行きたいカード
+                </strong>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                  {categories.want.length === 0 ? (
+                    <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
+                  ) : (
+                    categories.want.map((card) => (
+                      <div key={card.id} style={{ width: 80 }}>
+                        <img
+                          src={card.src}
+                          alt={card.title}
+                          style={{
+                            width: "100%",
+                            borderRadius: 4,
+                            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                            border: "2px solid #ec4899",
+                          }}
+                        />
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* どちらでもいいカード */}
+              <div style={{ marginBottom: 24 }}>
+                <strong style={{ 
+                  fontSize: "1.1rem", 
+                  color: "#9ca3af",
+                  display: "block",
+                  marginBottom: 12,
+                  paddingBottom: 8,
+                  borderBottom: "2px solid #9ca3af"
+                }}>
+                  どちらでもいいカード
+                </strong>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                  {categories.neutral.length === 0 ? (
+                    <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
+                  ) : (
+                    categories.neutral.map((card) => (
+                      <div key={card.id} style={{ width: 80 }}>
+                        <img
+                          src={card.src}
+                          alt={card.title}
+                          style={{
+                            width: "100%",
+                            borderRadius: 4,
+                            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                            border: "2px solid #9ca3af",
+                          }}
+                        />
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* 行きたくないカード */}
+              <div style={{ marginBottom: 24 }}>
+                <strong style={{ 
+                  fontSize: "1.1rem", 
+                  color: "#06b6d4",
+                  display: "block",
+                  marginBottom: 12,
+                  paddingBottom: 8,
+                  borderBottom: "2px solid #06b6d4"
+                }}>
+                  行きたくないカード
+                </strong>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                  {categories.dont.length === 0 ? (
+                    <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
+                  ) : (
+                    categories.dont.map((card) => (
+                      <div key={card.id} style={{ width: 80 }}>
+                        <img
+                          src={card.src}
+                          alt={card.title}
+                          style={{
+                            width: "100%",
+                            borderRadius: 4,
+                            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                            border: "2px solid #06b6d4",
+                          }}
+                        />
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* 特に行きたくないカード */}
+              <div>
+                <strong style={{ 
+                  fontSize: "1.1rem", 
+                  color: "#3b82f6",
+                  display: "block",
+                  marginBottom: 12,
+                  paddingBottom: 8,
+                  borderBottom: "2px solid #3b82f6"
+                }}>
+                  特に行きたくないカード
+                </strong>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                  {categories.veryDont.length === 0 ? (
+                    <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
+                  ) : (
+                    categories.veryDont.map((card) => (
+                      <div key={card.id} style={{ position: "relative", width: 80 }}>
+                        <img
+                          src={card.src}
+                          alt={card.title}
+                          style={{
+                            width: "100%",
+                            borderRadius: 4,
+                            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                            border: "2px solid #3b82f6",
+                          }}
+                        />
+                        {card.reason && (
+                          <div style={{
+                            position: "absolute",
+                            bottom: 4,
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "0.25rem",
+                            padding: "0.35rem 0.5rem",
+                            backgroundColor: "rgba(0,0,0,0.85)",
+                            color: "#fff",
+                            borderRadius: "0.375rem",
+                            maxWidth: "76px",
+                            width: "max-content",
+                            boxSizing: "border-box",
+                          }}>
+                            {(() => {
+                              // 理由を解析: "fullText:customText" または "fullText" または "customText"
+                              const colonIndex = card.reason.indexOf(':');
+                              let displayText = card.reason;
+                              let emoji = "";
+                              
+                              if (colonIndex !== -1) {
+                                const iconPart = card.reason.substring(0, colonIndex);
+                                const customPart = card.reason.substring(colonIndex + 1);
+                                const icon = reasonIcons.find(ic => ic.fullText === iconPart);
+                                if (icon) {
+                                  emoji = icon.emoji;
+                                  displayText = customPart;
+                                } else {
+                                  displayText = card.reason;
+                                }
+                              } else {
+                                const icon = reasonIcons.find(ic => ic.fullText === card.reason);
+                                if (icon) {
+                                  emoji = icon.emoji;
+                                  displayText = icon.fullText;
+                                }
+                              }
+                              
+                              return (
+                                <>
+                                  {emoji && (
+                                    <span style={{ 
+                                      fontSize: "0.85rem", 
+                                      flexShrink: 0, 
+                                      lineHeight: 1, 
+                                      marginTop: "1px" 
+                                    }}>
+                                      {emoji}
+                                    </span>
+                                  )}
+                                  <span style={{
+                                    fontSize: "0.65rem",
+                                    lineHeight: 1.3,
+                                    wordWrap: "break-word",
+                                    overflowWrap: "break-word",
+                                    wordBreak: "break-word",
+                                    whiteSpace: "normal",
+                                    flex: 1,
+                                    minWidth: 0,
+                                  }}>
+                                    {displayText}
+                                  </span>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "center", gap: 16, flexShrink: 0 }}>
+              <button
+                onClick={markMatchReady}
+                disabled={isSaving}
                 style={{
                   padding: "12px 24px",
                   fontSize: "1rem",
-                  backgroundColor: "#666",
+                  backgroundColor: isSaving ? "#9ca3af" : "#10b981",
                   color: "#fff",
                   border: "none",
-                  borderRadius: 6,
+                  borderRadius: 8,
+                  cursor: isSaving ? "not-allowed" : "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                {isSaving ? "保存中..." : "確定して議論に進む"}
+              </button>
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                style={{
+                  padding: "12px 24px",
+                  fontSize: "1rem",
+                  backgroundColor: "#6b7280",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
                   cursor: "pointer",
+                  fontWeight: 600,
                 }}
               >
                 戻る
@@ -1042,6 +1601,9 @@ export default function WaitingPage() {
           </div>
         </div>
       )}
+
+      {/* マップボタン */}
+      <MapButton />
     </>
   );
 }

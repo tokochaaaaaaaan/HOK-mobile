@@ -1,12 +1,12 @@
 {
   "rules": {
-    ".read": false,
-    ".write": false,
+    ".read": true,
+    ".write": true,
     "presence": {
       "$roomId": {
         "$uid": {
-          ".read": "auth != null",
-          ".write": "auth != null && auth.uid === $uid",
+          ".read": true,
+          ".write": true,
           "lastActive": { ".validate": "newData.isNumber() && newData.val() > 0" }
         }
       }

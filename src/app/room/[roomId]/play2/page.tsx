@@ -15,24 +15,27 @@ import {
 } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
 import { normalizeCategories } from "../../../../utils/normalizeCategories";
+import MapButton from "@/components/MapButton";
+import { cards } from "@/data/cards";
+import styles from "./page.module.css";
 
 type LogEntry = { id: string; user: string; card: string; polarity: number; category?: string };
 type CardInfo = { id: string; title: string; src: string; backSrc: string };
 
 // アイコンの定義
 const reasonIcons = [
-  { key: "gourmet", src: "/emoji/gourmet.svg", emoji: "🍴", text: "ご当地グルメ" },
-  { key: "thrill", src: "/emoji/thrill.svg", emoji: "🎢", text: "スリル" },
-  { key: "experience", src: "/emoji/experience.svg", emoji: "🏃", text: "体験" },
-  { key: "shopping", src: "/emoji/shopping.svg", emoji: "🛍", text: "買い物" },
-  { key: "design", src: "/emoji/design.svg", emoji: "🖼", text: "建築・デザイン" },
-  { key: "scenery", src: "/emoji/scenery.svg", emoji: "🏞", text: "景色" },
-  { key: "time", src: "/emoji/time.svg", emoji: "⏱", text: "時間" },
-  { key: "cost", src: "/emoji/cost.svg", emoji: "💰", text: "コスパ" },
-  { key: "friends", src: "/emoji/friends.svg", emoji: "🤝", text: "友達と一緒に" },
-  { key: "family", src: "/emoji/family.svg", emoji: "👪", text: "家族向け" },
-  { key: "relax", src: "/emoji/relax.svg", emoji: "🧘", text: "リラックス" },
-  { key: "other", src: "/emoji/other.svg", emoji: "❗", text: "その他" }
+  { key: "gourmet", src: "/emoji/gourmet.svg", emoji: "🍽", text: "食", fullText: "食事" },
+  { key: "thrill", src: "/emoji/thrill.svg", emoji: "🎢", text: "激", fullText: "スリル" },
+  { key: "experience", src: "/emoji/experience.svg", emoji: "🎯", text: "体", fullText: "体験" },
+  { key: "shopping", src: "/emoji/shopping.svg", emoji: "🛍", text: "買", fullText: "買い物" },
+  { key: "design", src: "/emoji/design.svg", emoji: "🏛", text: "建築", fullText: "建築・デザイン" },
+  { key: "scenery", src: "/emoji/scenery.svg", emoji: "🌅", text: "景", fullText: "景色" },
+  { key: "time", src: "/emoji/time.svg", emoji: "⏰", text: "時", fullText: "時間" },
+  { key: "cost", src: "/emoji/cost.svg", emoji: "💰", text: "¥", fullText: "コスパ" },
+  { key: "friends", src: "/emoji/friends.svg", emoji: "👥", text: "友", fullText: "友達と一緒に" },
+  { key: "family", src: "/emoji/family.svg", emoji: "👨‍👩‍👧‍👦", text: "家", fullText: "家族向け" },
+  { key: "relax", src: "/emoji/relax.svg", emoji: "🧘", text: "休", fullText: "リラックス" },
+  { key: "other", src: "/emoji/other.svg", emoji: "❗", text: "他", fullText: "その他" }
 ];
 
 export default function Play2Page() {
@@ -58,15 +61,12 @@ export default function Play2Page() {
   // (1) 全カード情報を準備
   const allCards: CardInfo[] = useMemo(
     () =>
-      Array.from({ length: 40 }, (_, i) => {
-        const idx = i + 1;
-        return {
-          id: `card${idx}`,
-          title: `カード${idx}`,
-          src: `/pngs/USJ_${idx}_surface-1.png`,
-          backSrc: `/pngs/back/USJ_${idx}_back-1.png`,
-        };
-      }),
+      cards.map((card) => ({
+        id: `card${card.id}`,
+        title: card.title,
+        src: card.frontSrc,
+        backSrc: card.backSrc,
+      })),
     []
   );
 
@@ -133,6 +133,7 @@ export default function Play2Page() {
   const [dontSelected, setDontSelected] = useState<Set<string>>(new Set());
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [isInitialized, setIsInitialized] = useState(false);
+  const [showAllModal, setShowAllModal] = useState(false);
 
   // リロード対応：play2Selectionsからデータを復元
   useEffect(() => {
@@ -185,18 +186,47 @@ export default function Play2Page() {
     const cardInfo = allCards.find(c => c.id === cardId) || null;
     const existingReason = reasons[cardId];
     
-    // 既存の理由がアイコンのテキストと一致するかチェック
-    const existingIconIndex = existingReason 
-      ? reasonIcons.findIndex(icon => icon.text === existingReason)
-      : -1;
+    let selectedIcon: number | null = null;
+    let customReason = "";
+    
+    if (existingReason) {
+      // 既存の理由を解析
+      // "アイコンのfullText:カスタムテキスト" の形式かチェック
+      const colonIndex = existingReason.indexOf(':');
+      
+      if (colonIndex !== -1) {
+        // コロンが含まれている場合、前半がアイコンのfullText、後半がカスタムテキスト
+        const iconPart = existingReason.substring(0, colonIndex);
+        const customPart = existingReason.substring(colonIndex + 1);
+        
+        const iconIndex = reasonIcons.findIndex(icon => icon.fullText === iconPart);
+        if (iconIndex >= 0) {
+          selectedIcon = iconIndex;
+          customReason = customPart;
+        } else {
+          // アイコンが見つからない場合は全体をカスタムテキストとして扱う
+          customReason = existingReason;
+        }
+      } else {
+        // コロンがない場合、アイコンのfullTextと一致するかチェック
+        const iconIndex = reasonIcons.findIndex(icon => icon.fullText === existingReason);
+        if (iconIndex >= 0) {
+          selectedIcon = iconIndex;
+          customReason = "";
+        } else {
+          // アイコンでもない場合はカスタムテキストとして扱う
+          customReason = existingReason;
+        }
+      }
+    }
     
     setReasonModal({
       isOpen: true,
       cardId,
       cardInfo,
       isFlipped: false,
-      selectedIcon: existingIconIndex >= 0 ? existingIconIndex : null,
-      customReason: existingIconIndex >= 0 ? "" : (existingReason || ""),
+      selectedIcon,
+      customReason,
     });
   };
 
@@ -213,7 +243,25 @@ export default function Play2Page() {
 
   const confirmReason = () => {
     const { cardId, selectedIcon, customReason } = reasonModal;
-    const finalReason = selectedIcon !== null ? reasonIcons[selectedIcon].text : customReason.trim();
+    
+    let finalReason = "";
+    
+    if (selectedIcon !== null) {
+      // アイコンが選択されている場合
+      const iconText = reasonIcons[selectedIcon].fullText;
+      const customText = customReason.trim();
+      
+      if (customText) {
+        // カスタムテキストがある場合: アイコンのfullText + カスタムテキスト
+        finalReason = `${iconText}:${customText}`;
+      } else {
+        // カスタムテキストがない場合: アイコンのfullTextのみ
+        finalReason = iconText;
+      }
+    } else {
+      // アイコンが選択されていない場合: カスタムテキストのみ
+      finalReason = customReason.trim();
+    }
     
     if (!finalReason) {
       alert("理由を選択または入力してください");
@@ -275,6 +323,18 @@ export default function Play2Page() {
   // (7) 終了処理とオーバーレイ制御
   const [showOverlay, setShowOverlay] = useState(false);
   const [planName, setPlanName] = useState("");
+
+  // モーダルが開いている時は背景のスクロールを防ぐ
+  useEffect(() => {
+    if (showOverlay) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showOverlay]);
 
   // 自動保存処理（選択やプラン名が変更された時）
   const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -342,35 +402,43 @@ export default function Play2Page() {
         playCategories,
       });
       
-      // waiting pageで使用するcategories形式に変換（重複排除前）
+      // 統一フォーマット: waiting pageと同じcategories形式
       let categoriesData: any = {
-        verywant: Array.from(wantSelected).map(cardId => {
+        veryWant: Array.from(wantSelected).map(cardId => {
           const card = allCards.find(c => c.id === cardId);
             return card ? { ...card, reason: reasons[cardId] || "" } : null;
         }).filter(Boolean),
         want: playCategories.want.map(cardId => allCards.find(c => c.id === cardId)).filter(Boolean),
         neutral: playCategories.neutral.map(cardId => allCards.find(c => c.id === cardId)).filter(Boolean),
         dont: playCategories.dont.map(cardId => allCards.find(c => c.id === cardId)).filter(Boolean),
-        verydont: Array.from(dontSelected).map(cardId => {
+        veryDont: Array.from(dontSelected).map(cardId => {
           const card = allCards.find(c => c.id === cardId);
           return card ? { ...card, reason: reasons[cardId] || "" } : null;
         }).filter(Boolean),
       };
       categoriesData = normalizeCategories(categoriesData);
       
-      // Firestoreに保存（ユーザー名をドキュメントIDとして使用）
+      // 実験データ保持用の旧形式（verywant/verydont）も保存
+      const legacyData = {
+        verywant: categoriesData.veryWant,
+        verydont: categoriesData.veryDont,
+      };
+      
+      // Firestoreに保存（merge: trueで既存データを保持）
       const userSelectionRef = doc(db, "rooms", roomId, "finalSelections", userName);
       await setDoc(userSelectionRef, {
         user: userName,
         userId: userName,
         userName: userName,
-        categories: categoriesData,
+        categories: categoriesData,  // 統一フォーマット（veryWant/veryDont）
+        ...legacyData,  // 旧形式も保存（実験データ用）
         planname: planName,
+        planName: planName,  // 両方のフィールド名を保存
         reasons,
         timestamp: serverTimestamp(),
         updatedAt: serverTimestamp(),
         lastUpdated: new Date(),
-      });
+      }, { merge: true });
       
       console.log("play2: Successfully saved finalSelection with planname:", planName);
       console.log("play2: Categories data:", categoriesData);
@@ -401,19 +469,30 @@ export default function Play2Page() {
             alignItems: "center",
             justifyContent: "center",
             zIndex: 2000,
+            overflow: "hidden",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowOverlay(false);
+            }
           }}
         >
           <div
             style={{
               width: "80%",
               maxWidth: 600,
+              maxHeight: "90vh",
               background: "#fff",
               padding: 24,
               borderRadius: 8,
               boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
             }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <p style={{ marginBottom: 16, fontSize: "1.1rem" }}>
+            <p style={{ marginBottom: 16, fontSize: "1.1rem", flexShrink: 0 }}>
               最後にこのカードを選んだ理由が<br />
               相手に伝わるようにプラン名を考えてください
             </p>
@@ -433,6 +512,7 @@ export default function Play2Page() {
                 borderRadius: 8,
                 boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
                 outline: "none",
+                flexShrink: 0,
               }}
               onFocus={(e) => {
                 e.currentTarget.style.border = "2px solid #60a5fa";
@@ -448,17 +528,39 @@ export default function Play2Page() {
                 fontSize: "1.5rem",
                 fontWeight: "bold",
                 textAlign: "center",
-                marginBottom: 24,
+                marginBottom: 16,
+                flexShrink: 0,
               }}
             >
               {planName}
             </div>
 
             {/* カード一覧 */}
-            <div style={{ textAlign: "left", marginBottom: 24 }}>
-              <h3>カード一覧</h3>
-              <div style={{ marginBottom: 16 }}>
-                <strong>行きたいカード</strong>
+            <div 
+              style={{ 
+                textAlign: "left", 
+                flex: 1, 
+                minHeight: 0, 
+                overflowY: "auto",
+                marginBottom: 16,
+              }}
+              onWheel={(e) => e.stopPropagation()}
+              onTouchMove={(e) => e.stopPropagation()}
+            >
+              <h3 style={{ marginBottom: 20, textAlign: "center", fontSize: "1.2rem" }}>選択したカード一覧</h3>
+              
+              {/* 特に行きたいカード */}
+              <div style={{ marginBottom: 24 }}>
+                <strong style={{ 
+                  fontSize: "1.1rem", 
+                  color: "#ef4444",
+                  display: "block",
+                  marginBottom: 12,
+                  paddingBottom: 8,
+                  borderBottom: "2px solid #ef4444"
+                }}>
+                  特に行きたいカード
+                </strong>
                 <div
                   style={{
                     display: "flex",
@@ -467,57 +569,106 @@ export default function Play2Page() {
                     marginTop: 8,
                   }}
                 >
-                  {Array.from(wantSelected)
-                    .sort((a, b) => parseInt(a.replace("card", ""), 10) - parseInt(b.replace("card", ""), 10))
-                    .map((id) => {
-                    const c = allCards.find((x) => x.id === id)!;
-                    const reason = reasons[id];
-                    const reasonIcon = reasonIcons.find(icon => icon.text === reason);
-                    const displayText = reasonIcon ? `${reasonIcon.emoji} ${reason}` : reason;
-                    
-                    return (
-                      <div
-                        key={id}
-                        style={{ position: "relative", width: 80 }}
-                      >
-                        <img
-                          src={c.src}
-                          alt={c.title}
-                          style={{
-                            width: "100%",
-                            borderRadius: 4,
-                            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
-                          }}
-                        />
-                        {reason && (
-                          <span
+                  {Array.from(wantSelected).length === 0 ? (
+                    <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
+                  ) : (
+                    Array.from(wantSelected)
+                      .sort((a, b) => parseInt(a.replace("card", ""), 10) - parseInt(b.replace("card", ""), 10))
+                      .map((id) => {
+                      const c = allCards.find((x) => x.id === id)!;
+                      const reason = reasons[id];
+                      
+                      // 理由を解析してアイコンとテキストを分離
+                      let displayEmoji = "";
+                      let displayText = reason || "";
+                      
+                      if (reason) {
+                        const colonIndex = reason.indexOf(':');
+                        if (colonIndex !== -1) {
+                          const iconPart = reason.substring(0, colonIndex);
+                          const customPart = reason.substring(colonIndex + 1);
+                          const reasonIcon = reasonIcons.find(icon => icon.fullText === iconPart);
+                          
+                          if (reasonIcon) {
+                            displayEmoji = reasonIcon.emoji;
+                            displayText = customPart;
+                          } else {
+                            displayText = reason;
+                          }
+                        } else {
+                          const reasonIcon = reasonIcons.find(icon => icon.fullText === reason);
+                          if (reasonIcon) {
+                            displayEmoji = reasonIcon.emoji;
+                            displayText = reasonIcon.fullText;
+                          } else {
+                            displayText = reason;
+                          }
+                        }
+                      }
+                      
+                      return (
+                        <div
+                          key={id}
+                          style={{ position: "relative", width: 80 }}
+                        >
+                          <img
+                            src={c.src}
+                            alt={c.title}
                             style={{
-                              position: "absolute",
-                              bottom: 4,
-                              left: "50%",
-                              transform: "translateX(-50%)",
-                              backgroundColor: "rgba(0,0,0,0.7)",
-                              color: "#fff",
-                              padding: "2px 6px",
+                              width: "100%",
                               borderRadius: 4,
-                              fontSize: "0.6rem",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              maxWidth: "76px",
+                              boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                              border: "2px solid #ef4444",
                             }}
-                            title={displayText}
-                          >
-                            {displayText}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
+                          />
+                          {reason && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                bottom: 4,
+                                left: "50%",
+                                transform: "translateX(-50%)",
+                                backgroundColor: "rgba(0,0,0,0.85)",
+                                color: "#fff",
+                                padding: "3px 6px",
+                                borderRadius: 4,
+                                fontSize: "0.65rem",
+                                whiteSpace: "nowrap",
+                                maxWidth: "76px",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "2px",
+                              }}
+                              title={displayText}
+                            >
+                              {displayEmoji && <span style={{ fontSize: "0.8rem" }}>{displayEmoji}</span>}
+                              <span style={{ 
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}>
+                                {displayText}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
-              <div>
-                <strong>行きたくないカード</strong>
+
+              {/* 行きたいカード（特に行きたいカードを除く） */}
+              <div style={{ marginBottom: 24 }}>
+                <strong style={{ 
+                  fontSize: "1.1rem", 
+                  color: "#ec4899",
+                  display: "block",
+                  marginBottom: 12,
+                  paddingBottom: 8,
+                  borderBottom: "2px solid #ec4899"
+                }}>
+                  行きたいカード
+                </strong>
                 <div
                   style={{
                     display: "flex",
@@ -526,73 +677,258 @@ export default function Play2Page() {
                     marginTop: 8,
                   }}
                 >
-                  {Array.from(dontSelected)
-                    .sort((a, b) => parseInt(a.replace("card", ""), 10) - parseInt(b.replace("card", ""), 10))
-                    .map((id) => {
-                    const c = allCards.find((x) => x.id === id)!;
-                    const reason = reasons[id];
-                    const reasonIcon = reasonIcons.find(icon => icon.text === reason);
-                    const displayText = reasonIcon ? `${reasonIcon.emoji} ${reason}` : reason;
-                    
-                    return (
-                      <div
-                        key={id}
-                        style={{ position: "relative", width: 80 }}
-                      >
-                        <img
-                          src={c.src}
-                          alt={c.title}
-                          style={{
-                            width: "100%",
-                            borderRadius: 4,
-                            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
-                          }}
-                        />
-                        {reason && (
-                          <span
-                            style={{
-                              position: "absolute",
-                              bottom: 4,
-                              left: "50%",
-                              transform: "translateX(-50%)",
-                              backgroundColor: "rgba(0,0,0,0.7)",
-                              color: "#fff",
-                              padding: "2px 6px",
-                              borderRadius: 4,
-                              fontSize: "0.6rem",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              maxWidth: "76px",
-                            }}
-                            title={displayText}
-                          >
-                            {displayText}
-                          </span>
-                        )}
-                      </div>
+                  {(() => {
+                    const wantCards = playCategories.want.filter(id => !wantSelected.has(id));
+                    return wantCards.length === 0 ? (
+                      <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
+                    ) : (
+                      wantCards
+                        .sort((a, b) => parseInt(a.replace("card", ""), 10) - parseInt(b.replace("card", ""), 10))
+                        .map((id) => {
+                          const c = allCards.find((x) => x.id === id)!;
+                          return (
+                            <div key={id} style={{ position: "relative", width: 80 }}>
+                              <img
+                                src={c.src}
+                                alt={c.title}
+                                style={{
+                                  width: "100%",
+                                  borderRadius: 4,
+                                  boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                                  border: "2px solid #ec4899",
+                                }}
+                              />
+                            </div>
+                          );
+                        })
                     );
-                  })}
+                  })()}
+                </div>
+              </div>
+
+              {/* どちらでもいいカード */}
+              <div style={{ marginBottom: 24 }}>
+                <strong style={{ 
+                  fontSize: "1.1rem", 
+                  color: "#9ca3af",
+                  display: "block",
+                  marginBottom: 12,
+                  paddingBottom: 8,
+                  borderBottom: "2px solid #9ca3af"
+                }}>
+                  どちらでもいいカード
+                </strong>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    marginTop: 8,
+                  }}
+                >
+                  {(() => {
+                    const neutralCards = playCategories.neutral;
+                    return neutralCards.length === 0 ? (
+                      <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
+                    ) : (
+                      neutralCards
+                        .sort((a, b) => parseInt(a.replace("card", ""), 10) - parseInt(b.replace("card", ""), 10))
+                        .map((id) => {
+                          const c = allCards.find((x) => x.id === id)!;
+                          return (
+                            <div key={id} style={{ position: "relative", width: 80 }}>
+                              <img
+                                src={c.src}
+                                alt={c.title}
+                                style={{
+                                  width: "100%",
+                                  borderRadius: 4,
+                                  boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                                  border: "2px solid #9ca3af",
+                                }}
+                              />
+                            </div>
+                          );
+                        })
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* 行きたくないカード（特に行きたくないカードを除く） */}
+              <div style={{ marginBottom: 24 }}>
+                <strong style={{ 
+                  fontSize: "1.1rem", 
+                  color: "#06b6d4",
+                  display: "block",
+                  marginBottom: 12,
+                  paddingBottom: 8,
+                  borderBottom: "2px solid #06b6d4"
+                }}>
+                  行きたくないカード
+                </strong>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    marginTop: 8,
+                  }}
+                >
+                  {(() => {
+                    const dontCards = playCategories.dont.filter(id => !dontSelected.has(id));
+                    return dontCards.length === 0 ? (
+                      <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
+                    ) : (
+                      dontCards
+                        .sort((a, b) => parseInt(a.replace("card", ""), 10) - parseInt(b.replace("card", ""), 10))
+                        .map((id) => {
+                          const c = allCards.find((x) => x.id === id)!;
+                          return (
+                            <div key={id} style={{ position: "relative", width: 80 }}>
+                              <img
+                                src={c.src}
+                                alt={c.title}
+                                style={{
+                                  width: "100%",
+                                  borderRadius: 4,
+                                  boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                                  border: "2px solid #06b6d4",
+                                }}
+                              />
+                            </div>
+                          );
+                        })
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* 特に行きたくないカード */}
+              <div>
+                <strong style={{ 
+                  fontSize: "1.1rem", 
+                  color: "#3b82f6",
+                  display: "block",
+                  marginBottom: 12,
+                  paddingBottom: 8,
+                  borderBottom: "2px solid #3b82f6"
+                }}>
+                  特に行きたくないカード
+                </strong>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    marginTop: 8,
+                  }}
+                >
+                  {Array.from(dontSelected).length === 0 ? (
+                    <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
+                  ) : (
+                    Array.from(dontSelected)
+                      .sort((a, b) => parseInt(a.replace("card", ""), 10) - parseInt(b.replace("card", ""), 10))
+                      .map((id) => {
+                      const c = allCards.find((x) => x.id === id)!;
+                      const reason = reasons[id];
+                      
+                      // 理由を解析してアイコンとテキストを分離
+                      let displayEmoji = "";
+                      let displayText = reason || "";
+                      
+                      if (reason) {
+                        const colonIndex = reason.indexOf(':');
+                        if (colonIndex !== -1) {
+                          const iconPart = reason.substring(0, colonIndex);
+                          const customPart = reason.substring(colonIndex + 1);
+                          const reasonIcon = reasonIcons.find(icon => icon.fullText === iconPart);
+                          
+                          if (reasonIcon) {
+                            displayEmoji = reasonIcon.emoji;
+                            displayText = customPart;
+                          } else {
+                            displayText = reason;
+                          }
+                        } else {
+                          const reasonIcon = reasonIcons.find(icon => icon.fullText === reason);
+                          if (reasonIcon) {
+                            displayEmoji = reasonIcon.emoji;
+                            displayText = reasonIcon.fullText;
+                          } else {
+                            displayText = reason;
+                          }
+                        }
+                      }
+                      
+                      return (
+                        <div
+                          key={id}
+                          style={{ position: "relative", width: 80 }}
+                        >
+                          <img
+                            src={c.src}
+                            alt={c.title}
+                            style={{
+                              width: "100%",
+                              borderRadius: 4,
+                              boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                              border: "2px solid #3b82f6",
+                            }}
+                          />
+                          {reason && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                bottom: 4,
+                                left: "50%",
+                                transform: "translateX(-50%)",
+                                backgroundColor: "rgba(0,0,0,0.85)",
+                                color: "#fff",
+                                padding: "3px 6px",
+                                borderRadius: 4,
+                                fontSize: "0.65rem",
+                                whiteSpace: "nowrap",
+                                maxWidth: "76px",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "2px",
+                              }}
+                              title={displayText}
+                            >
+                              {displayEmoji && <span style={{ fontSize: "0.8rem" }}>{displayEmoji}</span>}
+                              <span style={{ 
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}>
+                                {displayText}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "center", gap: 16 }}>
+            <div style={{ display: "flex", justifyContent: "center", gap: 16, flexShrink: 0 }}>
               <button
                 onClick={async () => {
                   if (!roomId || typeof roomId !== 'string' || !userName) return;
                   
                   try {
-                    // waiting pageで使用するcategories形式に変換（重複排除前）
+                    // 統一フォーマット: waiting pageと同じcategories形式
                     let categoriesData: any = {
-                      verywant: Array.from(wantSelected).map(cardId => {
+                      veryWant: Array.from(wantSelected).map(cardId => {
                         const card = allCards.find(c => c.id === cardId);
                           return card ? { ...card, reason: reasons[cardId] || "" } : null;
                       }).filter(Boolean),
                       want: playCategories.want.map(cardId => allCards.find(c => c.id === cardId)).filter(Boolean),
                       neutral: playCategories.neutral.map(cardId => allCards.find(c => c.id === cardId)).filter(Boolean),
                       dont: playCategories.dont.map(cardId => allCards.find(c => c.id === cardId)).filter(Boolean),
-                      verydont: Array.from(dontSelected).map(cardId => {
+                      veryDont: Array.from(dontSelected).map(cardId => {
                         const card = allCards.find(c => c.id === cardId);
                         return card ? { ...card, reason: reasons[cardId] || "" } : null;
                       }).filter(Boolean),
@@ -601,31 +937,35 @@ export default function Play2Page() {
                     categoriesData = normalizeCategories(categoriesData);
                     console.log("play2: After normalization:", JSON.stringify(categoriesData, null, 2));
                     
-                    // プラン名を含めて再度保存
+                    // 実験データ保持用の旧形式
+                    const legacyPlayData = {
+                      verywant: categoriesData.veryWant,
+                      verydont: categoriesData.veryDont,
+                      want: playCategories.want,
+                      neutral: playCategories.neutral,
+                      dont: playCategories.dont,
+                    };
+                    
+                    // プラン名を含めて再度保存（merge: trueで既存データを保持）
                     const userSelectionRef = doc(db, "rooms", roomId, "finalSelections", userName);
                     await setDoc(userSelectionRef, {
                       user: userName,
                       userId: userName,
                       userName: userName,
                       
-                      // 新形式（waiting pageで使用）
+                      // 統一フォーマット（veryWant/veryDont）
                       categories: categoriesData,
-                      planname: planName, // プラン名はplanname
+                      planname: planName,
+                      planName: planName,  // 両方のフィールド名を保存
                       
-                      // playからの分類（互換性のため）
-                      want: playCategories.want,
-                      neutral: playCategories.neutral,
-                      dont: playCategories.dont,
-                      
-                      // play2での選択
-                      verywant: Array.from(wantSelected),
-                      verydont: Array.from(dontSelected),
+                      // 実験データ用の旧形式も保存
+                      ...legacyPlayData,
                       reasons,
                       
                       timestamp: serverTimestamp(),
                       updatedAt: serverTimestamp(),
                       lastUpdated: new Date(),
-                    });
+                    }, { merge: true });
                     
                     console.log("play2: Final save completed with planname:", planName);
                     console.log("play2: Final categories data:", categoriesData);
@@ -668,39 +1008,30 @@ export default function Play2Page() {
       )}
 
       {/* Main Play2Page UI */}
-      <div style={{ padding: 16, fontFamily: "Arial, sans-serif" }}>
-        <h1 style={{ textAlign: "center", marginBottom: 24 }}>
+      <div className={styles.container}>
+        <h1 className={styles.title}>
           特に行きたい・行きたくないカードを {" "}
           <strong style={{ color: "#2196f3" }}>{minStops}</strong>個選んでください
         </h1>
 
         {/* フィルターボタン */}
-        <div style={{ textAlign: "center", marginBottom: 24 }}>
+        <div className={styles.filterButtons}>
           <button
             onClick={() => setFilter("want")}
+            className={`${styles.filterButton} ${filter === "want" ? styles.active : ""}`}
             style={{
-              marginRight: 8,
-              padding: "8px 16px",
-              fontSize: "1rem",
-              background: filter === "want" ? "#e91e63" : "#eee",
-              color: filter === "want" ? "#fff" : "#333",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
+              backgroundColor: filter === "want" ? "#e91e63" : undefined,
+              borderColor: filter === "want" ? "#e91e63" : undefined,
             }}
           >
             行きたい
           </button>
           <button
             onClick={() => setFilter("dont")}
+            className={`${styles.filterButton} ${filter === "dont" ? styles.active : ""}`}
             style={{
-              padding: "8px 16px",
-              fontSize: "1rem",
-              background: filter === "dont" ? "#03a9f4" : "#eee",
-              color: filter === "dont" ? "#fff" : "#333",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
+              backgroundColor: filter === "dont" ? "#03a9f4" : undefined,
+              borderColor: filter === "dont" ? "#03a9f4" : undefined,
             }}
           >
             行きたくない
@@ -708,192 +1039,177 @@ export default function Play2Page() {
         </div>
 
         {/* カード一覧＋ライブラリ＋終了ボタン */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 32,
-          }}
-        >
+        <div className={styles.cardArea}>
           {/* カード一覧 */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))",
-              gap: 16,
-              width: "100%",
-              maxWidth: 800,
-            }}
-          >
-            {filteredCards.map((card) => (
-              <div
-                key={card.id}
-                onClick={() => handleFlip(card.id)}
-                onDoubleClick={() => handleSelect(card.id)}
-                style={{
-                  border: currentSel.has(card.id)
-                    ? "3px solid #ff9800"
-                    : "1px solid #ccc",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  overflow: "hidden",
-                  userSelect: "none",
-                }}
-              >
-                <img
-                  src={flipped.has(card.id) ? card.backSrc : card.src}
-                  alt={card.title}
-                  style={{ width: "100%", display: "block" }}
-                />
-                <div style={{ padding: 8, textAlign: "center" }}>
-                  {card.title}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* ライブラリ */}
-          <div
-            style={{
-              width: "100%",
-              maxWidth: 800,
-              padding: 16,
-              backgroundColor: "#fafafa",
-              border: "1px solid #ddd",
-              borderRadius: 8,
-            }}
-          >
-            <h2 style={{ margin: "0 0 8px", fontSize: "1.1rem" }}>
-              {filter === "want"
-                ? "特に行きたいカード"
-                : "特に行きたくないカード"}
-            </h2>
-            <p style={{ margin: "0 0 12px", fontSize: "0.9rem", color: "#666" }}>
-              カードをクリックすると理由を編集できます
-            </p>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 16,
-                justifyContent: "center",
-                overflowX: "auto",
-              }}
-            >
-              {Array.from(currentSel)
-                .sort((a, b) => parseInt(a.replace("card", ""), 10) - parseInt(b.replace("card", ""), 10))
-                .map((id) => {
-                const card = allCards.find((c) => c.id === id)!;
-                const reason = reasons[id];
-                const reasonIcon = reasonIcons.find(icon => icon.text === reason);
-                const displayText = reasonIcon ? `${reasonIcon.emoji} ${reason}` : reason;
-                
-                return (
-                  <div 
-                    key={id} 
-                    style={{ position: "relative", width: 80, cursor: "pointer" }}
-                    onClick={() => openReasonModal(id)}
-                    title="クリックして理由を編集"
+          <div className={styles.cardListContainer}>
+            <div className={styles.scrollWrapper}>
+              <div className={styles.cardList}>
+                {filteredCards.map((card) => (
+                  <div
+                    key={card.id}
+                    onClick={() => handleSelect(card.id)}
+                    className={styles.card}
+                    style={{
+                      borderColor: currentSel.has(card.id) ? "#ff9800" : "#ccc",
+                      borderWidth: currentSel.has(card.id) ? "3px" : "1px",
+                    }}
                   >
                     <img
                       src={card.src}
                       alt={card.title}
-                      style={{
-                        width: "100%",
-                        borderRadius: 4,
-                        boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
-                      }}
+                      style={{ width: "100%", display: "block" }}
                     />
-                    {reason && (
-                      <span
-                        style={{
-                          position: "absolute",
-                          bottom: 4,
-                          left: "50%",
-                          transform: "translateX(-50%)",
-                          backgroundColor: "rgba(0,0,0,0.7)",
-                          color: "#fff",
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                          fontSize: "0.6rem",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          maxWidth: "76px",
-                        }}
-                        title={displayText}
-                      >
-                        {displayText}
-                      </span>
-                    )}
                   </div>
-                );
-              })}
+                ))}
+              </div>
+            </div>
+
+            {/* 全て見るボタン */}
+            <button
+              onClick={() => setShowAllModal(true)}
+              className={styles.viewAllButton}
+            >
+              すべて見る
+            </button>
+          </div>
+
+          {/* ライブラリ */}
+          <div className={styles.librarySection}>
+            <h2 className={styles.libraryTitle}>
+              {filter === "want"
+                ? "特に行きたいカード"
+                : "特に行きたくないカード"}
+            </h2>
+            <div className={styles.libraryScrollWrapper}>
+              <div className={styles.libraryList}>
+                {Array.from(currentSel)
+                  .sort((a, b) => parseInt(a.replace("card", ""), 10) - parseInt(b.replace("card", ""), 10))
+                  .map((id) => {
+                  const card = allCards.find((c) => c.id === id)!;
+                  const reason = reasons[id];
+                  
+                  // 理由を解析してアイコンとテキストを分離
+                  let displayEmoji = "";
+                  let displayText = reason || "";
+                  
+                  if (reason) {
+                    const colonIndex = reason.indexOf(':');
+                    if (colonIndex !== -1) {
+                      // "アイコンのfullText:カスタムテキスト" の形式
+                      const iconPart = reason.substring(0, colonIndex);
+                      const customPart = reason.substring(colonIndex + 1);
+                      const reasonIcon = reasonIcons.find(icon => icon.fullText === iconPart);
+                      
+                      if (reasonIcon) {
+                        displayEmoji = reasonIcon.emoji;
+                        displayText = customPart;
+                      } else {
+                        // アイコンが見つからない場合は全体を表示
+                        displayText = reason;
+                      }
+                    } else {
+                      // コロンがない場合、アイコンのfullTextと一致するかチェック
+                      const reasonIcon = reasonIcons.find(icon => icon.fullText === reason);
+                      if (reasonIcon) {
+                        displayEmoji = reasonIcon.emoji;
+                        displayText = reasonIcon.fullText; // fullTextを表示（短縮版ではなく）
+                      } else {
+                        displayText = reason;
+                      }
+                    }
+                  }
+                  
+                  return (
+                    <div 
+                      key={id} 
+                      className={styles.libraryCard}
+                      onClick={() => openReasonModal(id)}
+                      title="クリックして理由を編集"
+                    >
+                      <img
+                        src={card.src}
+                        alt={card.title}
+                        style={{ width: "100%", display: "block" }}
+                      />
+                      {reason && (
+                        <div className={styles.reasonDisplay}>
+                          {displayEmoji && <span className={styles.reasonEmoji}>{displayEmoji}</span>}
+                          <span className={styles.reasonText}>
+                            {displayText}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
           {/* 終了して次へボタン */}
-          <div style={{ textAlign: "center" }}>
+          <button
+            onClick={handleFinish}
+            className={styles.nextButton}
+          >
+            終了して次へ
+          </button>
+        </div>
+      </div>
+
+      {/* 全て見るモーダル */}
+      {showAllModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowAllModal(false)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ marginBottom: "1.5rem", fontSize: "1.5rem", fontWeight: "bold", textAlign: "center" }}>
+              {filter === "want" ? "行きたいカード一覧" : "行きたくないカード一覧"}
+            </h2>
+            <div className={styles.allCardsGrid}>
+              {filteredCards.map((card) => (
+                <div
+                  key={card.id}
+                  onClick={() => {
+                    handleSelect(card.id);
+                    setShowAllModal(false);
+                  }}
+                  style={{
+                    cursor: "pointer",
+                    textAlign: "center",
+                    border: currentSel.has(card.id) ? "3px solid #ff9800" : "1px solid #ccc",
+                    borderRadius: 8,
+                    overflow: "hidden",
+                    background: "#fff",
+                  }}
+                >
+                  <img
+                    src={card.src}
+                    alt={card.title}
+                    style={{ width: "100%", display: "block" }}
+                  />
+                </div>
+              ))}
+            </div>
             <button
-              onClick={handleFinish}
-              style={{
-                padding: "12px 24px",
-                fontSize: "1rem",
-                background: "#2196f3",
-                color: "#fff",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-              }}
+              onClick={() => setShowAllModal(false)}
+              className={`${styles.button} ${styles.buttonClose}`}
             >
-              終了して次へ
+              閉じる
             </button>
           </div>
         </div>
-      </div>
+      )}
 
       {/* 理由記入ウィンドウ */}
       {reasonModal.isOpen && reasonModal.cardInfo && (
         <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            background: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 3000,
-          }}
+          className={styles.modalOverlay}
+          style={{ zIndex: 3000 }}
           onClick={(e) => {
             if (e.target === e.currentTarget) closeReasonModal();
           }}
         >
-          <div
-            style={{
-              width: "80%",
-              maxWidth: 800,
-              height: "80%",
-              background: "#fff",
-              borderRadius: 12,
-              padding: 24,
-              display: "flex",
-              flexDirection: "column",
-              boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
-            }}
-          >
+          <div className={`${styles.modal} ${styles.reasonModal}`}>
             {/* ヘッダー */}
-            <div
-              style={{
-                textAlign: "center",
-                marginBottom: 24,
-                fontSize: "1.2rem",
-                fontWeight: "bold",
-              }}
-            >
+            <div className={styles.reasonModalTitle}>
               このカードを選んだ理由を選択・入力してください
             </div>
 
@@ -912,38 +1228,45 @@ export default function Play2Page() {
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
-                  paddingTop: 12,
-                  paddingBottom: 12,
                 }}
               >
-                <div
-                  style={{
-                    width: 180,
-                    height: 280,
-                    cursor: "pointer",
-                    borderRadius: 8,
-                    overflow: "hidden",
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                    marginTop: 12,
-                    marginBottom: 12,
-                  }}
-                  onClick={() =>
-                    setReasonModal(prev => ({ ...prev, isFlipped: !prev.isFlipped }))
-                  }
-                >
-                  <img
-                    src={
-                      reasonModal.isFlipped
-                        ? reasonModal.cardInfo.backSrc
-                        : reasonModal.cardInfo.src
+                <div className={styles.cardPreview}>
+                  <div
+                    className={`${styles.cardPreviewInner} ${reasonModal.isFlipped ? styles.flipped : ""}`}
+                    onClick={() =>
+                      setReasonModal(prev => ({ ...prev, isFlipped: !prev.isFlipped }))
                     }
-                    alt={reasonModal.cardInfo.title}
-                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                  />
+                  >
+                    <div className={styles.cardFace}>
+                      <img
+                        src={reasonModal.cardInfo.src}
+                        alt={reasonModal.cardInfo.title}
+                      />
+                    </div>
+                    <div className={`${styles.cardFace} ${styles.cardBack}`}>
+                      <img
+                        src={reasonModal.cardInfo.backSrc}
+                        alt={reasonModal.cardInfo.title}
+                      />
+                    </div>
+                    {/* 回転インジケーター */}
+                    <div className={styles.flipIndicator}>
+                      <svg 
+                        className={styles.rotateIcon}
+                        viewBox="0 0 24 24" 
+                        fill="none" 
+                        stroke="#3b82f6" 
+                        strokeWidth="2.5"
+                        strokeLinecap="round" 
+                        strokeLinejoin="round"
+                      >
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                      </svg>
+                    </div>
+                  </div>
                 </div>
                 <div
                   style={{
-                    marginTop: 12,
                     fontSize: "1rem",
                     fontWeight: "bold",
                     textAlign: "center",
@@ -955,42 +1278,26 @@ export default function Play2Page() {
 
               {/* 右側：アイコン選択 */}
               <div style={{ flex: 1 }}>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(6, 1fr)",
-                    gap: 12,
-                    marginBottom: 24,
-                  }}
-                >
-                  {reasonIcons.map((icon, index) => (
-                    <div
-                      key={index}
-                      onClick={() => {
-                        setReasonModal(prev => ({ 
-                          ...prev, 
-                          selectedIcon: index,
-                          customReason: ""
-                        }));
-                      }}
-                      style={{
-                        padding: 12,
-                        border: reasonModal.selectedIcon === index ? "3px solid #2196f3" : "1px solid #ddd",
-                        borderRadius: 8,
-                        cursor: "pointer",
-                        textAlign: "center",
-                        backgroundColor: reasonModal.selectedIcon === index ? "#e3f2fd" : "#fff",
-                        transition: "all 0.2s ease",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        height: 60,
-                        
-                      }}
-                    >
-                      <img src={icon.src} alt={icon.text} width={36} height={36} style={{ display: 'block' }} />
-                    </div>
-                  ))}
+                <div className={styles.iconSection}>
+                  <div className={styles.iconSectionTitle}>理由を選択</div>
+                  <div className={styles.iconGrid}>
+                    {reasonIcons.map((icon, index) => (
+                      <div
+                        key={index}
+                        onClick={() => {
+                          setReasonModal(prev => ({ 
+                            ...prev, 
+                            selectedIcon: index,
+                            customReason: ""
+                          }));
+                        }}
+                        className={`${styles.iconButton} ${reasonModal.selectedIcon === index ? styles.selected : ""}`}
+                        title={icon.fullText}
+                      >
+                        <div className={styles.iconEmoji}>{icon.emoji}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {/* テキストボックス */}
@@ -999,63 +1306,30 @@ export default function Play2Page() {
                   onChange={(e) =>
                     setReasonModal(prev => ({ 
                       ...prev, 
-                      customReason: e.target.value,
-                      selectedIcon: null 
+                      customReason: e.target.value
                     }))
                   }
                   placeholder={
                     reasonModal.selectedIcon !== null 
-                      ? reasonIcons[reasonModal.selectedIcon].text 
+                      ? reasonIcons[reasonModal.selectedIcon].fullText 
                       : "理由を記入して下さい"
                   }
-                  style={{
-                    width: "100%",
-                    height: 80,
-                    padding: 12,
-                    fontSize: "1rem",
-                    border: "1px solid #ddd",
-                    borderRadius: 8,
-                    resize: "none",
-                    boxSizing: "border-box",
-                  }}
+                  className={styles.textarea}
                 />
               </div>
             </div>
 
             {/* フッター：ボタン */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                gap: 16,
-                marginTop: 24,
-              }}
-            >
+            <div className={styles.modalButtons}>
               <button
                 onClick={confirmReason}
-                style={{
-                  padding: "12px 24px",
-                  fontSize: "1rem",
-                  backgroundColor: "#2196f3",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                }}
+                className={`${styles.button} ${styles.buttonConfirm}`}
               >
                 決定
               </button>
               <button
                 onClick={closeReasonModal}
-                style={{
-                  padding: "12px 24px",
-                  fontSize: "1rem",
-                  backgroundColor: "#666",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                }}
+                className={`${styles.button} ${styles.buttonCancel}`}
               >
                 戻る
               </button>
@@ -1063,6 +1337,8 @@ export default function Play2Page() {
           </div>
         </div>
       )}
+
+      <MapButton />
     </>
   );
 }
