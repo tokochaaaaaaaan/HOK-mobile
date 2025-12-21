@@ -1482,13 +1482,31 @@ export default function Play3Page() {
           const cardInfo = getCard(cardId);
           const cardName = cardInfo?.title || cardId;
           let resultMessage: string;
+          let resultMessageJSX: React.ReactNode;
           
           if (finalStatus === "go") {
             resultMessage = `${cardName}は行くに移動しました！`;
+            resultMessageJSX = resultMessage;
           } else if (finalStatus === "no") {
             resultMessage = `${cardName}は行かないに移動しました！`;
+            resultMessageJSX = resultMessage;
           } else {
             resultMessage = `投票が終了しました！コンフリクトが発生したため、${cardName}はVSに移動しました。もう一度議論を行い、投票を行いましょう。`;
+            resultMessageJSX = (
+              <div style={{ lineHeight: 1.6 }}>
+                <div>投票が終了しました！</div>
+                <div>コンフリクトが発生したため、{cardName}はVSに移動しました。</div>
+                <div style={{ 
+                  borderTop: '2px solid #f59e0b', 
+                  paddingTop: 8, 
+                  marginTop: 8,
+                  fontWeight: 600,
+                  color: '#f59e0b'
+                }}>
+                  もう一度議論を行い、投票を行いましょう。
+                </div>
+              </div>
+            );
           }
           
           // play3VoteResults に結果保存（履歴用）
@@ -2768,8 +2786,8 @@ export default function Play3Page() {
                   zIndex: 120,
                 }}
                 onClick={() => {
-                  // 全員投票モードの最中は外クリックで閉じられない（全員統一表示を維持）
-                  if (activeVote?.phase === "voting" || activeVote?.phase === "finalizing") return;
+                  // 全員投票モードの最中または投票済みの場合は外クリックで閉じられない
+                  if (activeVote?.phase === "voting" || activeVote?.phase === "finalizing" || myVoteChoice) return;
                   closeCard();
                 }}
               >
@@ -3267,73 +3285,11 @@ export default function Play3Page() {
                             }}>
                               行く: {goCount}
                             </div>
-                          )}
+                          )}  
                         </div>
                       </div>
                     );
                   })()}
-
-                  {/* 投票キャンセルボタンエリア */}
-                  {activeVote?.phase === "voting" && activeVote.startedBy === myUserId && (
-                    <div style={{ 
-                      borderTop: "1px solid #e5e7eb",
-                      padding: "12px 20px", 
-                      textAlign: "center",
-                      background: "#f9fafb",
-                    }}>
-                                <button
-                                  onClick={async () => {
-                                    if (!roomId || typeof roomId !== "string" || !activeVote?.sessionId) return;
-                                    // 投票を強制終了（phase: idle に戻す）
-                                    await setDoc(
-                                      doc(db, "rooms", roomId, "play3State", "state"),
-                                      {
-                                        phase: "idle" as VotePhase,
-                                        cardId: null,
-                                        sessionId: null,
-                                        round: null,
-                                        expectedUserIds: [],
-                                        updatedAt: serverTimestamp(),
-                                        // 後方互換
-                                        modalOpen: false,
-                                        initiatedById: null,
-                                        initiatedByName: null,
-                                      },
-                                      { merge: true }
-                                    );
-                                    // セッションドキュメントも削除またはcancelled状態に
-                                    await setDoc(
-                                      doc(db, "rooms", roomId, PLAY3_VOTE_SESSIONS, activeVote.sessionId),
-                                      {
-                                        phase: "idle" as VotePhase,
-                                        cancelled: true,
-                                        cancelledAt: Date.now(),
-                                        updatedAt: serverTimestamp(),
-                                      },
-                                      { merge: true }
-                                    );
-                                    setUiLocked(false);
-                                    setUiLockReason(null);
-                                    setMyVoteChoice(null);
-                                    setVoteMap({});
-                                    closeCard();
-                                  }}
-                                  style={{
-                                    padding: "8px 20px",
-                                    background: "#ef4444",
-                                    color: "#fff",
-                                    border: "none",
-                                    borderRadius: 8,
-                                    fontSize: 13,
-                                    fontWeight: 700,
-                                    cursor: "pointer",
-                                    boxShadow: "0 2px 8px rgba(239, 68, 68, 0.3)",
-                                  }}
-                                >
-                                  投票をキャンセル
-                                </button>
-                    </div>
-                  )}
                 </div>
               </div>
             );
@@ -3489,10 +3445,33 @@ export default function Play3Page() {
                 fontWeight: 900,
                 color: "#111827",
                 marginBottom: 24,
-                lineHeight: 1.4,
+                lineHeight: 1.6,
               }}
             >
-              {voteResultModal.message}
+              {(() => {
+                const msg = voteResultModal.message;
+                // VS移動メッセージの場合は改行と装飾を追加
+                if (msg.includes('コンフリクトが発生したため')) {
+                  const cardName = voteResultModal.cardName;
+                  return (
+                    <div style={{ lineHeight: 1.8 }}>
+                      <div>投票が終了しました！</div>
+                      <div>コンフリクトが発生したため、{cardName}はVSに移動しました。</div>
+                      <div style={{ 
+                        borderTop: '3px solid #f59e0b', 
+                        paddingTop: 16, 
+                        marginTop: 16,
+                        fontWeight: 700,
+                        color: '#f59e0b',
+                        fontSize: 22
+                      }}>
+                        もう一度議論を行い、投票を行いましょう。
+                      </div>
+                    </div>
+                  );
+                }
+                return msg;
+              })()}
             </div>
             <button
               onClick={async () => {
