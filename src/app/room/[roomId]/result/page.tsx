@@ -339,9 +339,28 @@ export default function ResultPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <button 
             onClick={() => setAllCardsModalOpen(true)}
-            style={{ padding: '8px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, fontWeight: 700, color: '#374151', cursor: 'pointer' }}
+            style={{ 
+              padding: '12px 24px', 
+              background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+              border: 'none',
+              borderRadius: 12, 
+              fontWeight: 800, 
+              color: '#fff', 
+              cursor: 'pointer',
+              fontSize: 15,
+              boxShadow: '0 8px 20px rgba(37, 99, 235, 0.3)',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 12px 28px rgba(37, 99, 235, 0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 8px 20px rgba(37, 99, 235, 0.3)';
+            }}
           >
-            全カード一覧
+            📋 全カード一覧
           </button>
           {renderAvatars()}
         </div>
@@ -494,9 +513,12 @@ export default function ResultPage() {
       {allCardsModalOpen && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110 }} onClick={() => setAllCardsModalOpen(false)}>
           <div style={{ width: 'min(95vw, 1200px)', maxHeight: '90vh', background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 25px 80px rgba(0,0,0,0.35)' }} onClick={e=>e.stopPropagation()}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontWeight: 900, fontSize: 20 }}>全カード一覧</div>
-              <button onClick={() => setAllCardsModalOpen(false)} style={{ padding: '6px 12px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontWeight: 700 }}>閉じる</button>
+            <div style={{ padding: '24px 28px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(135deg, #f0f9ff, #f8fafc)' }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 24, color: '#0f172a', marginBottom: 4 }}>📋 全カード一覧</div>
+                <div style={{ fontSize: 13, color: '#64748b' }}>全{allCardsWithFinalCategory.length}枚のカード、最終決定カテゴリと選択状況</div>
+              </div>
+              <button onClick={() => setAllCardsModalOpen(false)} style={{ padding: '8px 16px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontWeight: 700, color: '#374151', cursor: 'pointer' }}>閉じる</button>
             </div>
             <div style={{ padding: 20, overflowY: 'auto', maxHeight: 'calc(90vh - 80px)' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>

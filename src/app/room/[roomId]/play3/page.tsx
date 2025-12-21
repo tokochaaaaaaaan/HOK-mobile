@@ -3308,7 +3308,7 @@ export default function Play3Page() {
         }}
       >
         <button
-          disabled={vsSorted.length > 0 || uiLocked}
+          disabled={vsSorted.length > 0 || (play3Ready[myUserId] ? true : false)}
           onClick={async () => {
             if (!roomId || typeof roomId !== "string" || !myUserId) return;
             
@@ -3317,7 +3317,6 @@ export default function Play3Page() {
               myUserId, 
               normalizedUserName,
               vsSortedLength: vsSorted.length,
-              uiLocked,
               vsIds 
             });
             
@@ -3333,8 +3332,6 @@ export default function Play3Page() {
               },
               { merge: true }
             );
-            setUiLocked(true);
-            setUiLockReason("migrate");
           }}
           style={{
             opacity: vsSorted.length > 0 || uiLocked ? 0.5 : 1,
@@ -3350,9 +3347,9 @@ export default function Play3Page() {
           title={
             vsSorted.length > 0 
               ? `VSカードが${vsSorted.length}枚残っています。先に決定してください。` 
-              : uiLocked 
-              ? "既に終了ボタンを押しました。他の参加者を待っています。" 
-              : "クリックして結果ページに進む"
+              : play3Ready[myUserId]
+              ? "既に終了ボタンを押しました。結果ページへお進みください。" 
+              : "クリックして終了し、結果ページに進む"
           }
         >
           終了して結果を見る
@@ -3360,9 +3357,8 @@ export default function Play3Page() {
         </button>
       </div>
 
-      {/* ロック中オーバーレイ（全員の「終了」待ち） */}
-      {uiLocked &&
-        uiLockReason === "migrate" &&
+      {/* 全員準備完了待ちオーバーレイ（結果ページ遷移前） */}
+      {play3Ready[myUserId] &&
         (() => {
           // 参加者ベースでready状況を計算
           const actualParticipantCount = displayParticipants.length;
