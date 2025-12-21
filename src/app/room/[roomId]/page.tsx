@@ -64,9 +64,20 @@ export default function RoomPage() {
           const parts = data.participants || {};
           console.log('Current participants:', parts);
           
-          if (!Object.values(parts).includes(userName)) {
+          if (!Object.values(parts).some((p: any) => {
+            // participants が { id: "name" } 形式か { id: { name, joinedAt } } 形式か判定
+            const val = typeof p === 'string' ? p : p?.name;
+            return val === userName;
+          })) {
             console.log('User not in room, adding:', userName);
-            const newParticipants = { ...parts, [crypto.randomUUID()]: userName };
+            const userId = crypto.randomUUID();
+            const newParticipants = {
+              ...parts,
+              [userId]: {
+                name: userName,
+                joinedAt: Date.now(),
+              },
+            };
             console.log('New participants:', newParticipants);
             transaction.update(ref, {
               participants: newParticipants,
@@ -158,9 +169,16 @@ export default function RoomPage() {
       <div style={{ textAlign: "left", marginBottom: "24px" }}>
         <strong>参加者（{participantCount}/4）</strong>
         <ul style={{ listStyle: "none", padding: 0, margin: "8px 0" }}>
-          {Object.values(roomData.participants).map((name: any, i: number) => (
-            <li key={i} style={{ margin: "4px 0" }}>• {name}</li>
-          ))}
+          {Object.entries(roomData.participants || {})
+            .map(([id, data]: [string, any]) => ({
+              id,
+              name: typeof data === 'string' ? data : data?.name || id,
+              joinedAt: typeof data === 'string' ? 0 : (data?.joinedAt || 0),
+            }))
+            .sort((a, b) => a.joinedAt - b.joinedAt)
+            .map(({ id, name }) => (
+              <li key={id} style={{ margin: "4px 0" }}>• {name}</li>
+            ))}
         </ul>
       </div>
 

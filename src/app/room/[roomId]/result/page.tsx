@@ -8,6 +8,23 @@ import { db } from '../../../../../lib/firebase';
 import { normalizeCategories } from '../../../../utils/normalizeCategories';
 import MapButton from '@/components/MapButton';
 
+// 理由アイコンの定義
+const reasonIcons = [
+  { key: "gourmet", src: "/emoji/gourmet.svg", emoji: "🍽️", text: "食", fullText: "食事" },
+  { key: "photo", src: "/emoji/photo.svg", emoji: "📷", text: "写", fullText: "写真映え" },
+  { key: "thrill", src: "/emoji/thrill.svg", emoji: "🎢", text: "激", fullText: "スリル" },
+  { key: "experience", src: "/emoji/experience.svg", emoji: "🎯", text: "体", fullText: "体験" },
+  { key: "shopping", src: "/emoji/shopping.svg", emoji: "🛍️", text: "買", fullText: "買い物" },
+  { key: "design", src: "/emoji/design.svg", emoji: "🏛️", text: "建築", fullText: "建築・デザイン" },
+  { key: "scenery", src: "/emoji/scenery.svg", emoji: "🌅", text: "景", fullText: "景色" },
+  { key: "time", src: "/emoji/time.svg", emoji: "⏰", text: "時", fullText: "時間" },
+  { key: "cost", src: "/emoji/cost.svg", emoji: "💰", text: "¥", fullText: "コスパ" },
+  { key: "friends", src: "/emoji/friends.svg", emoji: "👥", text: "友", fullText: "友達と一緒に" },
+  { key: "family", src: "/emoji/family.svg", emoji: "👨‍👩‍👧‍👦", text: "家", fullText: "家族向け" },
+  { key: "relax", src: "/emoji/relax.svg", emoji: "🧘", text: "休", fullText: "リラックス" },
+  { key: "other", src: "/emoji/other.svg", emoji: "❗", text: "他", fullText: "その他" }
+];
+
 // カード名定義
 const cardTitles = [
   "ジョーズ",
@@ -107,6 +124,7 @@ export default function ResultPage() {
   const [userInfoExpanded, setUserInfoExpanded] = useState<Record<string, boolean>>({});
   const [allCardsModalOpen, setAllCardsModalOpen] = useState(false);
   const [categoryDetailModal, setCategoryDetailModal] = useState<{ userId: string; category: string } | null>(null);
+  const [expandedCard, setExpandedCard] = useState<{ id: string; flipped: boolean } | null>(null);
 
   // 初期: go/no/neutralだけ展開
   useEffect(() => {
@@ -578,14 +596,56 @@ export default function ResultPage() {
                       const reason = (card as any).reason || '';
                       const showReason = reason && (categoryDetailModal.category === 'veryWant' || categoryDetailModal.category === 'veryDont');
                       
+                      // 理由を解析してアイコンとテキストを分離
+                      let displayEmoji = "";
+                      let displayText = "";
+                      
+                      if (reason && reason.trim()) {
+                        const colonIndex = reason.indexOf(':');
+                        if (colonIndex !== -1) {
+                          const iconPart = reason.substring(0, colonIndex);
+                          const customPart = reason.substring(colonIndex + 1);
+                          const reasonIcon = reasonIcons.find(icon => icon.fullText === iconPart);
+                          
+                          if (reasonIcon) {
+                            displayEmoji = reasonIcon.emoji;
+                            displayText = customPart;
+                          } else {
+                            displayText = reason;
+                          }
+                        } else {
+                          const reasonIcon = reasonIcons.find(icon => icon.fullText === reason);
+                          if (reasonIcon) {
+                            displayEmoji = reasonIcon.emoji;
+                            displayText = reasonIcon.fullText;
+                          } else {
+                            displayText = reason;
+                          }
+                        }
+                      }
+                      
                       return (
-                        <div key={index} style={{ 
-                          border: `2px solid ${categoryStyle.border}`, 
-                          borderRadius: 12, 
-                          overflow: 'hidden', 
-                          background: '#fff',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                        }}>
+                        <div 
+                          key={index} 
+                          onClick={() => setExpandedCard({ id: card.id, flipped: false })}
+                          style={{ 
+                            border: `2px solid ${categoryStyle.border}`, 
+                            borderRadius: 12, 
+                            overflow: 'hidden', 
+                            background: '#fff',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                            cursor: 'pointer',
+                            transition: 'transform 0.2s, box-shadow 0.2s'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-4px)';
+                            e.currentTarget.style.boxShadow = '0 8px 20px rgba(0,0,0,0.15)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                          }}
+                        >
                           <div style={{ width: '100%', aspectRatio: '3/2', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <img src={info?.src} alt={info?.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           </div>
@@ -612,17 +672,24 @@ export default function ResultPage() {
                                 {categoryName}
                               </div>
                             </div>
-                            {showReason && (
+                            {showReason && (displayEmoji || displayText) && (
                               <div style={{ 
-                                background: '#f8fafc', 
-                                border: '1px solid #e2e8f0', 
+                                background: '#f9fafb', 
+                                border: '1px solid #e5e7eb', 
                                 borderRadius: 8, 
-                                padding: 8,
-                                marginTop: 8
+                                padding: '8px 10px',
+                                marginTop: 8,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8
                               }}>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', marginBottom: 4 }}>理由:</div>
-                                <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.4 }}>
-                                  {reason || '（理由なし）'}
+                                {displayEmoji && (
+                                  <span style={{ fontSize: 18, flexShrink: 0 }}>
+                                    {displayEmoji}
+                                  </span>
+                                )}
+                                <div style={{ fontSize: 13, color: '#374151', fontWeight: 600, lineHeight: 1.5, flex: 1 }}>
+                                  {displayText}
                                 </div>
                               </div>
                             )}
@@ -682,6 +749,159 @@ export default function ResultPage() {
               <div style={{ padding: 16, display: 'flex', justifyContent: 'flex-end' }}>
                 <button onClick={() => setCardModal(null)} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 16px', fontWeight: 700, color: '#334155', cursor: 'pointer' }}>閉じる</button>
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 拡大カードモーダル（3D回転） */}
+      {expandedCard && (() => {
+        const info = getCardInfo(expandedCard.id);
+        return (
+          <div 
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.6)',
+              backdropFilter: 'blur(4px)',
+              zIndex: 200,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 20,
+            }}
+            onClick={() => setExpandedCard(null)}
+          >
+            <div
+              style={{
+                background: '#fff',
+                borderRadius: 16,
+                padding: 24,
+                maxWidth: 600,
+                width: '100%',
+                boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* カード表示エリア */}
+              <div
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  aspectRatio: '3/2',
+                  perspective: '1000px',
+                  cursor: 'pointer',
+                  marginBottom: 16,
+                }}
+                onClick={() => setExpandedCard(prev => prev ? { ...prev, flipped: !prev.flipped } : null)}
+              >
+                <div
+                  style={{
+                    position: 'relative',
+                    width: '100%',
+                    height: '100%',
+                    transition: 'transform 0.6s',
+                    transformStyle: 'preserve-3d',
+                    transform: expandedCard.flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+                  }}
+                >
+                  {/* 表面 */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      width: '100%',
+                      height: '100%',
+                      backfaceVisibility: 'hidden',
+                      borderRadius: 12,
+                      overflow: 'hidden',
+                      background: '#fff',
+                      boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
+                    }}
+                  >
+                    <img
+                      src={info?.src}
+                      alt={info?.title}
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                    />
+                  </div>
+                  {/* 裏面 */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      width: '100%',
+                      height: '100%',
+                      backfaceVisibility: 'hidden',
+                      transform: 'rotateY(180deg)',
+                      borderRadius: 12,
+                      overflow: 'hidden',
+                      background: '#fff',
+                      boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
+                    }}
+                  >
+                    <img
+                      src={`/pngs/back/USJ_${expandedCard.id.replace('card', '')}_back-1.png`}
+                      alt={`${info?.title} 裏面`}
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                    />
+                  </div>
+                  {/* 回転インジケーター */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: 16,
+                      right: 16,
+                      width: 48,
+                      height: 48,
+                      background: 'rgba(0, 0, 0, 0.5)',
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      pointerEvents: 'none',
+                      backdropFilter: 'blur(4px)',
+                    }}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#fff"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{ width: 24, height: 24 }}
+                    >
+                      <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+              
+              {/* カード情報 */}
+              <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                <div style={{ fontWeight: 900, fontSize: 20, color: '#111827' }}>
+                  {info?.title}
+                </div>
+                <div style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>
+                  クリックで回転
+                </div>
+              </div>
+              
+              {/* 閉じるボタン */}
+              <button
+                onClick={() => setExpandedCard(null)}
+                style={{
+                  width: '100%',
+                  padding: '12px 24px',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 8,
+                  background: '#f3f4f6',
+                  fontWeight: 700,
+                  color: '#6b7280',
+                  cursor: 'pointer',
+                }}
+              >
+                閉じる
+              </button>
             </div>
           </div>
         );

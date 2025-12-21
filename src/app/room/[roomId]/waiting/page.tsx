@@ -11,6 +11,9 @@ import {
   serverTimestamp,
   collection,
   query,
+  getDocs,
+  addDoc,
+  QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
 import MapButton from "@/components/MapButton";
@@ -222,6 +225,8 @@ export default function WaitingPage() {
   const [selfReady, setSelfReady] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [interactionLocked, setInteractionLocked] = useState(false);
+  // カード移動履歴用：各カードの移動回数を記録
+  const [cardMoveCount, setCardMoveCount] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (!roomId || !userName) return;
@@ -377,6 +382,42 @@ export default function WaitingPage() {
     }
   }, [matchReadyData, participants, router, roomId]);
 
+  // --- カード移動履歴を記録 ---
+  const saveMovementHistory = useCallback(
+    async (cardId: string, fromCategory: CategoryType, toCategory: CategoryType) => {
+      if (!roomId || !userName) return;
+      
+      try {
+        // この特定カードの移動回数を取得・更新
+        const currentCount = cardMoveCount[cardId] || 0;
+        const newCount = currentCount + 1;
+        
+        // カウンターを更新
+        setCardMoveCount(prev => ({
+          ...prev,
+          [cardId]: newCount,
+        }));
+        
+        // waiting_result/{userName}サブコレクションに記録
+        const movementRef = collection(db, "waiting_result", userName, "movements");
+        await addDoc(movementRef, {
+          documentName: `${cardId}_${newCount}`,
+          cardId: cardId,
+          from: fromCategory,
+          to: toCategory,
+          timestamp: serverTimestamp(),
+          movedAt: new Date().toISOString(),
+          moveCount: newCount,
+        });
+        
+        console.log(`Movement recorded: ${cardId}_${newCount} from ${fromCategory} to ${toCategory}`);
+      } catch (error) {
+        console.error('Error saving movement history:', error);
+      }
+    },
+    [roomId, userName, cardMoveCount]
+  );
+
   // --- Firestore 保存ヘルパ ---
   const saveCategories = useCallback(
     async (next: Categories) => {
@@ -521,29 +562,13 @@ export default function WaitingPage() {
       if (!picked.card || !picked.from) return;
       const card = picked.card;
 
-      // 1) target が 特に〜 → play2と同様に理由モーダル
-      if (target === "veryWant" || target === "veryDont") {
-        // まず仮でカードを target に移して、理由入力へ
-        const base = removeFromCategory(card.id, picked.from, categories);
-        const next = addToCategory({ ...card, reason: card.reason || "" }, target, base);
-        setCategories(normalizeCategories(next));
-        saveCategories(normalizeCategories(next));
-        setPicked({ card: null, from: null });
-        setReasonModal({
-          isOpen: true,
-          card: { ...card },
-          category: target,
-          from: target, // 現在は特に〜内
-          originalFrom: picked.from, // 戻る先として保持
-          selectedIcon: null,
-          customReason: card.reason || "",
-          flipped: false,
-        });
-        return;
-      }
+      // 共通: 元が特に〜で理由がある場合で、移動先が異なる場所の場合 → 理由消去の確認
+      const fromIsSpecial = picked.from === "veryWant" || picked.from === "veryDont";
+      const targetIsSpecial = target === "veryWant" || target === "veryDont";
+      const hasReason = card.reason && card.reason.length > 0;
+      const isDifferentCategory = target !== picked.from;
 
-      // 2) from が 特に〜 かつ 理由がついている → 理由消去の確認
-      if ((picked.from === "veryWant" || picked.from === "veryDont") && (card.reason && card.reason.length > 0)) {
+      if (fromIsSpecial && hasReason && isDifferentCategory) {
         setConfirmDialog({
           isOpen: true,
           card: { ...card },
@@ -553,7 +578,49 @@ export default function WaitingPage() {
         return;
       }
 
-      // 3) 通常移動
+      // 1) target が 特に〜で元と同じ場所の場合 → 理由編集用にモーダル開く
+      if (targetIsSpecial && target === picked.from) {
+        const base = removeFromCategory(card.id, picked.from, categories);
+        const next = addToCategory({ ...card, reason: card.reason || "" }, target, base);
+        setCategories(normalizeCategories(next));
+        saveCategories(normalizeCategories(next));
+        setPicked({ card: null, from: null });
+        setReasonModal({
+          isOpen: true,
+          card: { ...card },
+          category: target,
+          from: target,
+          originalFrom: target,
+          selectedIcon: null,
+          customReason: card.reason || "",
+          flipped: false,
+        });
+        return;
+      }
+
+      // 2) 通常カテゴリから特に〜へ移動 → 理由モーダルを開く
+      if (targetIsSpecial && !fromIsSpecial) {
+        const base = removeFromCategory(card.id, picked.from, categories);
+        const next = addToCategory({ ...card, reason: card.reason || "" }, target, base);
+        setCategories(normalizeCategories(next));
+        saveCategories(normalizeCategories(next));
+        // カード移動履歴を記録
+        saveMovementHistory(card.id, picked.from, target);
+        setPicked({ card: null, from: null });
+        setReasonModal({
+          isOpen: true,
+          card: { ...card },
+          category: target,
+          from: target,
+          originalFrom: picked.from,
+          selectedIcon: null,
+          customReason: card.reason || "",
+          flipped: false,
+        });
+        return;
+      }
+
+      // 3) 通常カテゴリへの通常移動（特に〜から理由なしで移動、または通常同士の移動）
       const base = removeFromCategory(card.id, picked.from, categories);
       // 理由は通常カテゴリでは不要なので必ず除去
       // allCardsから元の情報を取得して、理由なしの新しいオブジェクトを作成
@@ -568,9 +635,11 @@ export default function WaitingPage() {
       const normalized = normalizeCategories(next);
       setCategories(normalized);
       saveCategories(normalized);
+      // カード移動履歴を記録
+      saveMovementHistory(card.id, picked.from, target);
       setPicked({ card: null, from: null });
     },
-    [picked, categories, addToCategory, removeFromCategory, saveCategories]
+    [picked, categories, addToCategory, removeFromCategory, saveCategories, saveMovementHistory, allCards]
   );
 
   // ------- 理由モーダルを開く（特に〜をクリック時） -------
@@ -663,6 +732,7 @@ export default function WaitingPage() {
 
     let finalReason = "";
     
+    // 理由の生成ロジック：selectedIcon か customReason のどちらかが必須（既にボタン無効化で防止済み）
     if (selectedIcon !== null) {
       // アイコンが選択されている場合
       const iconText = reasonIcons[selectedIcon].fullText;
@@ -675,9 +745,12 @@ export default function WaitingPage() {
         // カスタムテキストがない場合: アイコンのfullTextのみ
         finalReason = iconText;
       }
-    } else {
+    } else if (customReason.trim()) {
       // アイコンが選択されていない場合: カスタムテキストのみ
       finalReason = customReason.trim();
+    } else {
+      // 両方なし（ボタン無効化で防止されているはずだが、念のため）
+      finalReason = "";
     }
 
     // カードの完全な情報を保持
@@ -710,7 +783,8 @@ export default function WaitingPage() {
       title: fullCardInfo?.title || card.title || `カード${card.id.replace('card', '')}`,
       src: fullCardInfo?.src || card.src || `/pngs/USJ_${card.id.replace('card', '')}_surface-1.png`,
       backSrc: fullCardInfo?.backSrc || card.backSrc || `/pngs/back/USJ_${card.id.replace('card', '')}_back-1.png`,
-      // 理由は除去（通常カテゴリなので）
+      // 理由は除去
+      reason: "",
     };
 
     const base = removeFromCategory(card.id, originalCategory, categories);
@@ -718,9 +792,35 @@ export default function WaitingPage() {
     const normalized = normalizeCategories(next);
     setCategories(normalized);
     saveCategories(normalized);
+    // カード移動履歴を記録
+    saveMovementHistory(card.id, originalCategory, targetCategory);
     setConfirmDialog({ isOpen: false, card: null, originalCategory: null, targetCategory: null });
     setPicked({ card: null, from: null });
-  }, [confirmDialog, categories, removeFromCategory, addToCategory, saveCategories, allCards]);
+    
+    // 移動先が特に〜の場合のみ理由モーダルを開く
+    // （通常カテゴリへの移動の場合はモーダルを開かない）
+    if (targetCategory === "veryWant" || targetCategory === "veryDont") {
+      // 理由なしのカードオブジェクトを作成してモーダルで表示
+      const cardWithoutReason = {
+        id: movedCard.id,
+        title: movedCard.title,
+        src: movedCard.src,
+        backSrc: movedCard.backSrc,
+        // 理由は含めない
+      } as CardWithReason;
+      
+      setReasonModal({
+        isOpen: true,
+        card: cardWithoutReason,
+        category: targetCategory,
+        from: targetCategory,
+        originalFrom: originalCategory,
+        selectedIcon: null,
+        customReason: "",
+        flipped: false,
+      });
+    }
+  }, [confirmDialog, categories, removeFromCategory, addToCategory, saveCategories, saveMovementHistory, allCards]);
 
   const cancelConfirmDialog = () =>
     setConfirmDialog({ isOpen: false, card: null, originalCategory: null, targetCategory: null });
@@ -745,9 +845,9 @@ export default function WaitingPage() {
     // 理由を解析してアイコンとテキストを分離
     const reason = card.reason || "";
     let displayEmoji = "";
-    let displayText = reason;
+    let displayText = "";
     
-    if (reason) {
+    if (reason && reason.trim()) {
       const colonIndex = reason.indexOf(':');
       if (colonIndex !== -1) {
         const iconPart = reason.substring(0, colonIndex);
@@ -801,7 +901,7 @@ export default function WaitingPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
           <div style={{ fontSize: ".9rem", fontWeight: 600 }}>{card.title}</div>
         </div>
-        {reason && (
+        {displayText && (
           <div style={{ 
             marginTop: 4, 
             fontSize: ".65rem", 
@@ -903,6 +1003,8 @@ export default function WaitingPage() {
     if (selfReady || isSaving) return;
     try {
       setIsSaving(true);
+      const submittedAt = new Date().toISOString();
+      
       // finalSelections を確定保存（merge: trueで既存データを保持）
       await setDoc(doc(db, "rooms", roomId, "finalSelections", userName), {
         user: userName,
@@ -915,12 +1017,54 @@ export default function WaitingPage() {
         updatedAt: serverTimestamp(),
         timestamp: serverTimestamp(),
       }, { merge: true });
+      
       // matchReady に登録
       await setDoc(doc(db, "rooms", roomId, "matchReady", userName), {
         userId: userName,
         ready: true,
         updatedAt: serverTimestamp(),
       }, { merge: true });
+      
+      // waiting_result_last に最終結果を保存
+      await setDoc(doc(db, "waiting_result_last", userName, "result_last", "final"), {
+        userName: userName,
+        submittedAt: submittedAt,
+        timestamp: serverTimestamp(),
+        planName: planName || "",
+        finalPlacement: {
+          veryWant: categories.veryWant.map(c => ({
+            cardId: c.id,
+            title: c.title,
+            reason: c.reason || "",
+          })),
+          want: categories.want.map(c => ({
+            cardId: c.id,
+            title: c.title,
+          })),
+          neutral: categories.neutral.map(c => ({
+            cardId: c.id,
+            title: c.title,
+          })),
+          dont: categories.dont.map(c => ({
+            cardId: c.id,
+            title: c.title,
+          })),
+          veryDont: categories.veryDont.map(c => ({
+            cardId: c.id,
+            title: c.title,
+            reason: c.reason || "",
+          })),
+        },
+        // 各カテゴリのカードID配列も保存（クエリしやすいように）
+        veryWantCards: categories.veryWant.map(c => c.id),
+        wantCards: categories.want.map(c => c.id),
+        neutralCards: categories.neutral.map(c => c.id),
+        dontCards: categories.dont.map(c => c.id),
+        veryDontCards: categories.veryDont.map(c => c.id),
+      });
+      
+      console.log(`Final result saved for ${userName} at ${submittedAt}`);
+      
       setSelfReady(true);
       setInteractionLocked(true);
       setShowConfirmModal(false);
@@ -1154,6 +1298,22 @@ export default function WaitingPage() {
                   }
                   className={styles.textarea}
                 />
+
+                {/* 警告メッセージ */}
+                {reasonModal.selectedIcon === null && reasonModal.customReason.trim() === "" && (
+                  <div style={{
+                    marginTop: 12,
+                    padding: "8px 12px",
+                    backgroundColor: "#fecaca",
+                    color: "#dc2626",
+                    borderRadius: 4,
+                    fontSize: "0.9rem",
+                    fontWeight: 500,
+                    textAlign: "center"
+                  }}>
+                    理由を選んでください
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1161,7 +1321,12 @@ export default function WaitingPage() {
             <div className={styles.modalButtons}>
               <button
                 onClick={confirmReason}
+                disabled={reasonModal.selectedIcon === null && reasonModal.customReason.trim() === ""}
                 className={`${styles.button} ${styles.buttonConfirm}`}
+                style={{
+                  opacity: reasonModal.selectedIcon === null && reasonModal.customReason.trim() === "" ? 0.5 : 1,
+                  cursor: reasonModal.selectedIcon === null && reasonModal.customReason.trim() === "" ? "not-allowed" : "pointer",
+                }}
               >
                 決定
               </button>

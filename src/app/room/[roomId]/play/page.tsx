@@ -83,7 +83,7 @@ export default function PlayPage() {
   ];
 
   // 初期カードプール（40枚）
-  const initialCards: PlayPageCard[] = Array.from({ length: 40 }, (_, i) => {
+  const initialCards: PlayPageCard[] = Array.from({ length: 5 }, (_, i) => {
     const idx = i + 1;
     return {
       id: `card${idx}`,
