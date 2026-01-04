@@ -7,6 +7,7 @@ import { useUser } from "@/context/UserContext";
 import { usePreventBack } from "@/hooks/usePreventBack";
 import { doc, getDoc, updateDoc, onSnapshot, runTransaction } from "firebase/firestore";
 import { db } from "../../../../lib/firebase";
+import { addAuthKey } from "../../../../lib/firebase-auth";
 
 export default function RoomPage() {
   const { roomId } = useParams();
@@ -17,7 +18,7 @@ export default function RoomPage() {
   usePreventBack();
 
   const [roomData, setRoomData] = useState<any>(null);
-  const [minStops, setMinStops] = useState<number>(3);
+  const [minStops, setMinStops] = useState<number>(6);
   const [startPhase, setStartPhase] = useState<"solo" | "discussion">("solo");
 
   // ルーム情報のリアルタイム購読（ここで gameStarted も監視します）
@@ -112,11 +113,11 @@ export default function RoomPage() {
     // Firestore にフラグを書き込む
     if (!roomId || typeof roomId !== 'string') return;
     const roomRef = doc(db, "rooms", roomId);
-    await updateDoc(roomRef, {
+    await updateDoc(roomRef, addAuthKey({
       minStops,
       startPhase,
       gameStarted: true,
-    });
+    }));
     // ホスト自身は即座に second に飛ばす
     router.push(`/room/${roomId}/second`);
   };
@@ -124,6 +125,9 @@ export default function RoomPage() {
   if (!roomData) return null;
 
   const participantCount = Object.keys(roomData.participants || {}).length;
+
+  // 必要な「行きたい」カード枚数を計算（半分以上）
+  const requiredWantCards = Math.ceil(minStops / 2);
 
   return (
     <>
@@ -254,12 +258,13 @@ export default function RoomPage() {
           backgroundColor: "#f8f9fa",
           borderRadius: "8px",
           border: "1px solid #e9ecef",
-          color: "#6c757d",
+          color: "#0f172a",
           fontSize: "1rem",
           lineHeight: 1.5,
+          fontWeight: 700,
         }}>
           📍 ホストが目的地の<br />最低周遊数を決めています
-          <div style={{ marginTop: "8px", fontSize: "0.9rem" }}>
+          <div style={{ marginTop: "8px", fontSize: "0.9rem", color: "#0f172a", fontWeight: 700 }}>
             しばらくお待ちください...
           </div>
         </div>

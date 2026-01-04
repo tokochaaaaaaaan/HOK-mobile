@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { customAlphabet } from "nanoid";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../../../lib/firebase";
+import { addAuthKey } from "../../../lib/firebase-auth";
 import { useUser } from "@/context/UserContext";
 
 // 衝突しやすい文字を除いたセット
@@ -21,12 +22,12 @@ export default function CreateRoomButton() {
     }
     const roomId = generateId();
     const roomRef = doc(db, "rooms", roomId);
-    await setDoc(roomRef, {
+    await setDoc(roomRef, addAuthKey({
       createdAt: serverTimestamp(),
       host: userName,
       gameStarted: false,
       participants: {},
-    });
+    }));
     router.push(`/room/${roomId}`);
   };
 

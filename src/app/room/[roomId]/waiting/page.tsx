@@ -227,6 +227,11 @@ export default function WaitingPage() {
   const [interactionLocked, setInteractionLocked] = useState(false);
   // カード移動履歴用：各カードの移動回数を記録
   const [cardMoveCount, setCardMoveCount] = useState<Record<string, number>>({});
+  const [minStops, setMinStops] = useState<number>(6); // 周遊数（Firestoreから取得）
+  const [showWarning, setShowWarning] = useState(false); // 警告モーダル表示フラグ
+  const [warningMessage, setWarningMessage] = useState<string>(""); // 警告メッセージ
+  const [pendingSave, setPendingSave] = useState(false); // デバウンス保存用フラグ
+  const [saveTimestamp, setSaveTimestamp] = useState(Date.now()); // 最終保存時刻
 
   useEffect(() => {
     if (!roomId || !userName) return;
@@ -325,7 +330,7 @@ export default function WaitingPage() {
     return () => un();
   }, [roomId, userName, allCards]);
 
-  // 参加者購読（rooms/{roomId}.participants）
+  // 参加者購読（rooms/{roomId}.participants）とminStops取得
   useEffect(() => {
     if (!roomId) return;
     const roomRef = doc(db, "rooms", roomId);
@@ -333,10 +338,27 @@ export default function WaitingPage() {
       if (snap.exists()) {
         const data = snap.data() as any;
         setParticipants((data?.participants || {}) as Record<string, string>);
+        if (data.minStops !== undefined) {
+          setMinStops(data.minStops);
+        }
       }
     });
     return () => un();
   }, [roomId]);
+
+  // デバウンス保存用のuseEffect（3秒後に自動保存）
+  useEffect(() => {
+    if (!pendingSave) return;
+    
+    const timer = setTimeout(() => {
+      console.log('waiting: デバウンス保存を実行');
+      saveCategories(categories);
+      setPendingSave(false);
+      setSaveTimestamp(Date.now());
+    }, 3000); // 3秒後に保存
+    
+    return () => clearTimeout(timer);
+  }, [pendingSave, categories]);
 
   // 準備状況購読（rooms/{roomId}/matchReady）
   useEffect(() => {
@@ -583,7 +605,7 @@ export default function WaitingPage() {
         const base = removeFromCategory(card.id, picked.from, categories);
         const next = addToCategory({ ...card, reason: card.reason || "" }, target, base);
         setCategories(normalizeCategories(next));
-        saveCategories(normalizeCategories(next));
+        setPendingSave(true); // デバウンス保存
         setPicked({ card: null, from: null });
         setReasonModal({
           isOpen: true,
@@ -600,10 +622,18 @@ export default function WaitingPage() {
 
       // 2) 通常カテゴリから特に〜へ移動 → 理由モーダルを開く
       if (targetIsSpecial && !fromIsSpecial) {
+        // 上限チェック：特に行きたい・特に行きたくないはminStops枚まで
+        const currentCount = target === "veryWant" ? categories.veryWant.length : categories.veryDont.length;
+        if (currentCount >= minStops) {
+          alert(`${target === "veryWant" ? "特に行きたい" : "特に行きたくない"}カードは最大${minStops}枚までです`);
+          setPicked({ card: null, from: null });
+          return;
+        }
+        
         const base = removeFromCategory(card.id, picked.from, categories);
         const next = addToCategory({ ...card, reason: card.reason || "" }, target, base);
         setCategories(normalizeCategories(next));
-        saveCategories(normalizeCategories(next));
+        setPendingSave(true); // デバウンス保存
         // カード移動履歴を記録
         saveMovementHistory(card.id, picked.from, target);
         setPicked({ card: null, from: null });
@@ -634,12 +664,12 @@ export default function WaitingPage() {
       const next = addToCategory(movedCard, target, base);
       const normalized = normalizeCategories(next);
       setCategories(normalized);
-      saveCategories(normalized);
+      setPendingSave(true); // デバウンス保存
       // カード移動履歴を記録
       saveMovementHistory(card.id, picked.from, target);
       setPicked({ card: null, from: null });
     },
-    [picked, categories, addToCategory, removeFromCategory, saveCategories, saveMovementHistory, allCards]
+    [picked, categories, addToCategory, removeFromCategory, saveMovementHistory, allCards, minStops]
   );
 
   // ------- 理由モーダルを開く（特に〜をクリック時） -------
@@ -767,9 +797,9 @@ export default function WaitingPage() {
     const next = addToCategory(updatedCard, category, base);
     const normalized = normalizeCategories(next);
     setCategories(normalized);
-    await saveCategories(normalized);
+    setPendingSave(true); // デバウンス保存
     closeReasonModal();
-  }, [reasonModal, categories, removeFromCategory, addToCategory, saveCategories, allCards]);
+  }, [reasonModal, categories, removeFromCategory, addToCategory, allCards]);
 
   // ------- 確認ダイアログ：理由を消して移動 -------
   const confirmDropWithoutReason = useCallback(() => {
@@ -791,7 +821,7 @@ export default function WaitingPage() {
     const next = addToCategory(movedCard, targetCategory, base);
     const normalized = normalizeCategories(next);
     setCategories(normalized);
-    saveCategories(normalized);
+    setPendingSave(true); // デバウンス保存
     // カード移動履歴を記録
     saveMovementHistory(card.id, originalCategory, targetCategory);
     setConfirmDialog({ isOpen: false, card: null, originalCategory: null, targetCategory: null });
@@ -837,7 +867,7 @@ export default function WaitingPage() {
 
     const handleClick = (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (interactionLocked) return;
+      if (interactionLocked || reasonModal.isOpen) return;
       // すべてのカテゴリでクリックはピック開始（特に〜も移動可能に）
       startPick(card, category);
     };
@@ -939,9 +969,9 @@ export default function WaitingPage() {
 
     return (
       <div
-        onMouseEnter={() => { if (picked.card) setDropZone(category); }}
-        onMouseLeave={() => { if (picked.card) setDropZone(null); }}
-        onClick={() => { if (picked.card) attemptDropToCategory(category); }}
+        onMouseEnter={() => { if (picked.card && !reasonModal.isOpen) setDropZone(category); }}
+        onMouseLeave={() => { if (picked.card && !reasonModal.isOpen) setDropZone(null); }}
+        onClick={() => { if (picked.card && !reasonModal.isOpen) attemptDropToCategory(category); }}
         style={{
           flex: 1,
           minHeight: 240,
@@ -950,7 +980,7 @@ export default function WaitingPage() {
           border,
           background: bg,
           transition: "all .12s ease-in-out",
-          pointerEvents: interactionLocked ? "none" : "auto",
+          pointerEvents: interactionLocked || reasonModal.isOpen ? "none" : "auto",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -960,9 +990,9 @@ export default function WaitingPage() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {/* 左端の配置プレースホルダ（周囲は点線のまま） */}
           <div
-            onMouseEnter={() => { if (picked.card) setDropZone(category); }}
-            onMouseLeave={() => { if (picked.card) setDropZone(null); }}
-            onClick={(e) => { e.stopPropagation(); if (picked.card) attemptDropToCategory(category); }}
+            onMouseEnter={() => { if (picked.card && !reasonModal.isOpen) setDropZone(category); }}
+            onMouseLeave={() => { if (picked.card && !reasonModal.isOpen) setDropZone(null); }}
+            onClick={(e) => { e.stopPropagation(); if (picked.card && !reasonModal.isOpen) attemptDropToCategory(category); }}
             title={picked.card ? "ここに配置" : "カードを選ぶとここに配置できます"}
             aria-label="配置可能プレースホルダ"
             style={{
@@ -1001,6 +1031,36 @@ export default function WaitingPage() {
   const markMatchReady = useCallback(async () => {
     if (!roomId || !userName) return;
     if (selfReady || isSaving) return;
+    
+    // 条件チェック
+    const veryWantCount = categories.veryWant.length;
+    const veryDontCount = categories.veryDont.length;
+    const requiredVeryWant = Math.ceil(minStops / 2);
+
+    // 1. 「特に行きたい」の下限チェック
+    if (veryWantCount < requiredVeryWant) {
+      setWarningMessage(`特に行きたいカードが${requiredVeryWant - veryWantCount}枚足りません！\n特に行きたいに${requiredVeryWant}枚以上必要です。`);
+      setShowWarning(true);
+      setShowConfirmModal(false);
+      return;
+    }
+
+    // 2. 「特に行きたい」の上限チェック
+    if (veryWantCount > minStops) {
+      setWarningMessage(`特に行きたいカードが${veryWantCount - minStops}枚多すぎます！\n特に行きたいは最大${minStops}枚までです。`);
+      setShowWarning(true);
+      setShowConfirmModal(false);
+      return;
+    }
+
+    // 3. 「特に行きたくない」の上限チェック
+    if (veryDontCount > minStops) {
+      setWarningMessage(`特に行きたくないカードが${veryDontCount - minStops}枚多すぎます！\n特に行きたくないは最大${minStops}枚までです。`);
+      setShowWarning(true);
+      setShowConfirmModal(false);
+      return;
+    }
+    
     try {
       setIsSaving(true);
       const submittedAt = new Date().toISOString();
@@ -1071,7 +1131,7 @@ export default function WaitingPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [roomId, userName, categories, planName, selfReady, isSaving]);
+  }, [roomId, userName, categories, planName, selfReady, isSaving, minStops]);
 
   if (!isHydrated) return <div style={{ padding: 24 }}>読み込み中…</div>;
 
@@ -1090,6 +1150,85 @@ export default function WaitingPage() {
 
   return (
     <>
+      {/* 警告モーダル */}
+      {showWarning && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#fff',
+              padding: '32px',
+              borderRadius: '16px',
+              maxWidth: '500px',
+              width: '90%',
+              textAlign: 'center',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+            }}
+          >
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚠️</div>
+            <h2 style={{ marginBottom: '16px', fontSize: '1.5rem', color: '#dc2626' }}>
+              条件を満たしていません
+            </h2>
+            <p style={{ marginBottom: '24px', fontSize: '1.1rem', lineHeight: '1.6', whiteSpace: 'pre-line' }}>
+              {warningMessage}
+            </p>
+            <button
+              onClick={() => setShowWarning(false)}
+              style={{
+                padding: '12px 32px',
+                fontSize: '1rem',
+                fontWeight: 'bold',
+                backgroundColor: '#3b82f6',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+              }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 条件表示（左上） */}
+      <div
+        style={{
+          position: 'fixed',
+          top: '16px',
+          left: '16px',
+          padding: '12px 16px',
+          backgroundColor: '#fef3c7',
+          color: '#92400e',
+          border: '2px solid #f59e0b',
+          borderRadius: '8px',
+          fontSize: '0.85rem',
+          fontWeight: 'bold',
+          zIndex: 100,
+          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+          lineHeight: '1.6',
+        }}
+      >
+        <div style={{ marginBottom: '4px', fontSize: '0.9rem', color: '#78350f' }}>📋 条件</div>
+        <div>・特に行きたいに{Math.ceil(minStops / 2)}枚以上</div>
+        <div>・特に行きたい/行きたくないは各{minStops}枚まで</div>
+        <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #fbbf24', fontSize: '0.8rem' }}>
+          現在: 特に行きたい {veryWantCount}枚 / 特に行きたくない {veryDontCount}枚
+        </div>
+      </div>
+
       <div style={{ padding: 16 }}>
         {/* ヘッダー（前UIに近づけ） */}
         <div style={{ textAlign: "center", marginBottom: 20 }}>
@@ -1101,7 +1240,7 @@ export default function WaitingPage() {
             <input
               value={planName}
               onChange={(e) => setPlanName(e.target.value)}
-              onBlur={() => saveCategories(categories)}
+              onBlur={() => setPendingSave(true)} // デバウンス保存
               placeholder="プラン名を入力してください"
               style={{
                 fontSize: 18,

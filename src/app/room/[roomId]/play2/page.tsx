@@ -12,6 +12,7 @@ import {
   where,
   setDoc,
   serverTimestamp,
+  getDoc,
 } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
 import { normalizeCategories } from "../../../../utils/normalizeCategories";
@@ -134,23 +135,25 @@ export default function Play2Page() {
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [isInitialized, setIsInitialized] = useState(false);
   const [showAllModal, setShowAllModal] = useState(false);
+  const [showWarning, setShowWarning] = useState(false); // 警告モーダル表示フラグ
+  const [warningMessage, setWarningMessage] = useState<string>(""); // 警告メッセージ
 
-  // リロード対応：play2Selectionsからデータを復元
+  // リロード対応：finalSelectionsからデータを復元（初回のみ）
   useEffect(() => {
     if (!roomId || typeof roomId !== 'string' || !userName || isInitialized) return;
 
-    const unsubscribe = onSnapshot(
-      doc(db, "rooms", roomId, "play2Selections", userName),
-      (docSnap) => {
+    getDoc(doc(db, "rooms", roomId, "finalSelections", userName))
+      .then((docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data();
           console.log("play2: リロード復元データ:", data);
           
-          if (data.want) {
-            setWantSelected(new Set(data.want));
+          // veryWant/veryDontからwant/dontを復元
+          if (data.categories?.veryWant) {
+            setWantSelected(new Set(data.categories.veryWant.map((c: any) => c.id || c)));
           }
-          if (data.dont) {
-            setDontSelected(new Set(data.dont));
+          if (data.categories?.veryDont) {
+            setDontSelected(new Set(data.categories.veryDont.map((c: any) => c.id || c)));
           }
           if (data.reasons) {
             setReasons(data.reasons);
@@ -159,10 +162,11 @@ export default function Play2Page() {
           console.log("play2: 新規ユーザー - 初期状態で開始");
         }
         setIsInitialized(true);
-      }
-    );
-
-    return () => unsubscribe();
+      })
+      .catch((error) => {
+        console.error("play2: データ復元エラー:", error);
+        setIsInitialized(true);
+      });
   }, [roomId, userName, isInitialized]);
 
   // 理由記入ウィンドウの状態管理
@@ -286,18 +290,14 @@ export default function Play2Page() {
     const selSet = isWant ? wantSelected : dontSelected;
     const setter = isWant ? setWantSelected : setDontSelected;
 
-    // 既に選択済みなら解除＆理由削除
+    // 既に選択済みなら理由編集モーダルを開く（解除しない）
     if (selSet.has(id)) {
-      setter((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      setReasons((prev) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { [id]: deleted, ...rest } = prev;
-        return rest;
-      });
+      openReasonModal(id);
+      return;
+    }
+    // 上限チェック：特に行きたい・特に行きたくないはminStops枚まで
+    if (selSet.size >= minStops) {
+      alert(`${filter === "want" ? "特に行きたい" : "特に行きたくない"}カードは最大${minStops}枚までです`);
       return;
     }
     // 選択可能なら理由記入ウィンドウを開く（minStops未満ならOK）
@@ -336,61 +336,20 @@ export default function Play2Page() {
     };
   }, [showOverlay]);
 
-  // 自動保存処理（選択やプラン名が変更された時）
-  const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
-  
-  const autoSave = useCallback(async () => {
-    if (!roomId || typeof roomId !== 'string' || !userName || !isInitialized) return;
-    
-    try {
-      const saveData = {
-        user: userName,
-        want: Array.from(wantSelected),
-        dont: Array.from(dontSelected),
-        reasons,
-        planName,
-        updatedAt: serverTimestamp(),
-        lastUpdated: new Date(),
-      };
-      
-      await setDoc(doc(db, "rooms", roomId, "play2Selections", userName), saveData);
-      console.log("play2: 自動保存完了");
-    } catch (error) {
-      console.error("play2: 自動保存エラー:", error);
-    }
-  }, [roomId, userName, wantSelected, dontSelected, reasons, planName, isInitialized]);
-
-  // デバウンス付き自動保存
-  const debouncedAutoSave = useCallback(() => {
-    setSaveTimeout(prevTimeout => {
-      if (prevTimeout) {
-        clearTimeout(prevTimeout);
-      }
-      
-      return setTimeout(() => {
-        autoSave();
-      }, 1000); // 1秒後に保存
-    });
-  }, [autoSave]);
-
-  // 選択状態やプラン名が変更された時に自動保存
-  useEffect(() => {
-    if (isInitialized) {
-      debouncedAutoSave();
-    }
-  }, [wantSelected, dontSelected, reasons, planName, isInitialized, debouncedAutoSave]);
-
-  // クリーンアップ
-  useEffect(() => {
-    return () => {
-      if (saveTimeout) {
-        clearTimeout(saveTimeout);
-      }
-    };
-  }, [saveTimeout]);
-
   const handleFinish = async () => {
     if (!roomId || typeof roomId !== 'string' || !userName) return;
+    
+    // 条件チェック
+    const veryWantCount = wantSelected.size;
+    const veryDontCount = dontSelected.size;
+    const requiredVeryWant = Math.ceil(minStops / 2);
+
+    // 1. 「特に行きたい」の下限チェック
+    if (veryWantCount < requiredVeryWant) {
+      setWarningMessage(`特に行きたいカードが${requiredVeryWant - veryWantCount}枚足りません！\n特に行きたいに${requiredVeryWant}枚以上必要です。`);
+      setShowWarning(true);
+      return;
+    }
     
     try {
       console.log("play2: Starting save with data:", {
@@ -1006,6 +965,86 @@ export default function Play2Page() {
           </div>
         </div>
       )}
+
+      {/* 警告モーダル */}
+      {showWarning && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#fff',
+              padding: '32px',
+              borderRadius: '16px',
+              maxWidth: '500px',
+              width: '90%',
+              textAlign: 'center',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+            }}
+          >
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚠️</div>
+            <h2 style={{ marginBottom: '16px', fontSize: '1.5rem', color: '#dc2626' }}>
+              条件を満たしていません
+            </h2>
+            <p style={{ marginBottom: '24px', fontSize: '1.1rem', lineHeight: '1.6', whiteSpace: 'pre-line' }}>
+              {warningMessage}
+            </p>
+            <button
+              onClick={() => setShowWarning(false)}
+              style={{
+                padding: '12px 32px',
+                fontSize: '1rem',
+                fontWeight: 'bold',
+                backgroundColor: '#3b82f6',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+              }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 条件表示（左上） */}
+      <div
+        style={{
+          position: 'fixed',
+          top: '12px',
+          left: '12px',
+          padding: '10px 14px',
+          backgroundColor: '#fef3c7',
+          color: '#92400e',
+          border: '2px solid #f59e0b',
+          borderRadius: '8px',
+          fontSize: '0.8rem',
+          fontWeight: 'bold',
+          zIndex: 100,
+          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+          lineHeight: '1.5',
+          maxWidth: '200px',
+        }}
+      >
+        <div style={{ marginBottom: '4px', fontSize: '0.85rem', color: '#78350f' }}>📋 条件</div>
+        <div>・特に行きたい{Math.ceil(minStops / 2)}枚以上</div>
+        <div>・各{minStops}枚まで</div>
+        <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #fbbf24', fontSize: '0.75rem' }}>
+          現在: {wantSelected.size}枚 / {dontSelected.size}枚
+        </div>
+      </div>
 
       {/* Main Play2Page UI */}
       <div className={styles.container}>

@@ -5,6 +5,7 @@ import { useUser } from "@/context/UserContext";
 import { usePreventBack } from "@/hooks/usePreventBack";
 import { doc, setDoc, onSnapshot, collection } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
+import { addAuthKey } from "../../../../../lib/firebase-auth";
 
 export default function MyCardsPage() {
   const { roomId } = useParams();
@@ -27,12 +28,12 @@ export default function MyCardsPage() {
       "results",
       userName
     );
-    await setDoc(resultRef, {
+    await setDoc(resultRef, addAuthKey({
       userName,
       positions: cardPositions,
        ready: true,
        timestamp: new Date(),
-     });
+     }));
      setIsWaiting(true);
   };
 
