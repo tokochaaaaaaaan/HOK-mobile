@@ -118,19 +118,9 @@ export default function Play3Page() {
     };
   }, []);
 
-  // 画面が狭い場合に全体を少し縮小して表示
-  const [scale, setScale] = useState(1);
-  useEffect(() => {
-    const update = () => {
-      const h = window.innerHeight || 0;
-      setScale(h < 900 ? 0.85 : 1);
-    };
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
+  // Scale機能を削除して、常に画面全体を使用
 
-  // カード定義（40枚）
+  // カード定義（39枚）
   const cardTitles = [
     "ジョーズ",
     "アミティ・ボードウォーク・ゲーム",
@@ -161,7 +151,6 @@ export default function Play3Page() {
     "シング・オン・ツアー",
     "スタジオ・スターズ・レストラン",
     "ビバリーヒルズ・ブランジェリー",
-    "鬼滅の刃 XRライド ~刀鍛冶の里を疾走せよ~",
     "ハローキティのコーナーカフェ",
     "スヌーピー・バックロット・カフェ",
     "ハローキティのリボン・コレクション",
@@ -176,7 +165,7 @@ export default function Play3Page() {
 
   const ALL_CARDS = useMemo(
     () =>
-      Array.from({ length: 40 }, (_, i) => {
+      Array.from({ length: 39 }, (_, i) => {
         const idx = i + 1;
         return {
           id: `card${idx}`,
@@ -814,7 +803,7 @@ export default function Play3Page() {
   // 合致率計算（全体・カード別）
   useEffect(() => {
     if (!selections.length) return;
-    const matrix = convertSelectionsToMatrix(selections as any, 40);
+    const matrix = convertSelectionsToMatrix(selections as any, 39);
     setOverallAgreement(agreementOverall(matrix));
     const map = new Map<string, number>();
     matrix.forEach((ratings, idx) => {
@@ -1902,8 +1891,8 @@ export default function Play3Page() {
     canEndGame: vsSorted.length === 0 && !uiLocked
   });
 
-  // 縮小時はカード幅も少し小さく
-  const TILE_W = scale < 1 ? 180 : 220;
+  // カード幅を固定
+  const TILE_W = 200;
 
   return (
     <div
@@ -1911,7 +1900,6 @@ export default function Play3Page() {
     >
       <div
         className={styles.scaleWrapper}
-        style={{ transform: `scale(${scale})` }}
       >
         {/* ヘッダー行 */}
         <div className={styles.header}>
@@ -2252,7 +2240,7 @@ export default function Play3Page() {
                     <div
                       key={id}
                       onClick={() => {
-                        setExpandedCard({ id, flipped: false });
+                        openCard(id);
                       }}
                       style={{
                         cursor: 'pointer',
@@ -3470,18 +3458,9 @@ export default function Play3Page() {
               })()}
             </div>
             <button
-              onClick={async () => {
+              onClick={() => {
+                // 自分の画面だけ閉じる（他のユーザーには影響させない）
                 setVoteResultModal(null);
-                // Firestoreから投票結果を削除
-                if (roomId && typeof roomId === "string") {
-                  await setDoc(
-                    doc(db, "rooms", roomId, "play3State", "state"),
-                    {
-                      voteResult: null,
-                    },
-                    { merge: true }
-                  );
-                }
               }}
               style={{
                 padding: "14px 32px",
@@ -3631,7 +3610,11 @@ export default function Play3Page() {
                       return (
                         <div
                           key={id}
-                          onClick={() => setExpandedCard({ id, flipped: false })}
+                          onClick={() => {
+                            setExpandedCard(null);
+                            setCardModal({ id, flipped: false });
+                            setAreaDetailModal({ area: null });
+                          }}
                           style={{
                             cursor: 'pointer',
                             border: hasBlackBorder ? '4px solid #000' : '1px solid #e5e7eb',
@@ -3695,101 +3678,115 @@ export default function Play3Page() {
             style={{
               position: 'fixed',
               inset: 0,
-              background: 'rgba(0,0,0,0.7)',
-              backdropFilter: 'blur(8px)',
+              background: 'rgba(0,0,0,0.85)',
               zIndex: 500,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: 20,
+              cursor: 'pointer',
             }}
             onClick={() => setExpandedCard(null)}
           >
             <div
               style={{
+                maxWidth: '90vw',
+                maxHeight: '90vh',
                 position: 'relative',
-                maxWidth: 600,
-                width: '90%',
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* カード本体 */}
-              <div className={styles.expandedCardContainer}>
-                <div
-                  className={`${styles.expandedCardInner} ${expandedCard.flipped ? styles.flipped : ''}`}
-                  onClick={() => setExpandedCard({ ...expandedCard, flipped: !expandedCard.flipped })}
-                >
-                  {/* 表面 */}
-                  <div className={styles.expandedCardFace}>
-                    <img
-                      src={info?.src}
-                      alt={info?.title}
-                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                    />
-                  </div>
-                  {/* 裏面 */}
-                  <div className={`${styles.expandedCardFace} ${styles.expandedCardBack}`}>
-                    <img
-                      src={info?.backSrc}
-                      alt={info?.title}
-                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                    />
-                  </div>
-                </div>
-                
-                {/* 回転インジケーター */}
-                <div className={styles.expandedCardFlipIndicator}>
-                  <svg 
-                    viewBox="0 0 24 24" 
-                    fill="none" 
-                    stroke="#fff" 
-                    strokeWidth="2.5"
-                    strokeLinecap="round" 
-                    strokeLinejoin="round"
-                    style={{ width: 32, height: 32 }}
-                  >
-                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-                  </svg>
-                </div>
-              </div>
-              
-              {/* カード名 */}
-              <div
+              <img
+                src={
+                  expandedCard.flipped
+                    ? info?.backSrc
+                    : info?.src
+                }
+                alt={info?.title}
+                onClick={() => setExpandedCard({ ...expandedCard, flipped: !expandedCard.flipped })}
                 style={{
-                  marginTop: 16,
-                  fontSize: 20,
-                  fontWeight: 900,
-                  color: '#fff',
-                  textAlign: 'center',
-                  textShadow: '0 2px 8px rgba(0,0,0,0.5)',
+                  maxWidth: '100%',
+                  maxHeight: '90vh',
+                  objectFit: 'contain',
+                  borderRadius: '12px',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+                  cursor: 'pointer',
                 }}
+              />
+              {/* 回転ボタン */}
+              <button
+                onClick={() => setExpandedCard({ ...expandedCard, flipped: !expandedCard.flipped })}
+                style={{
+                  position: 'absolute',
+                  bottom: '-16px',
+                  right: '-16px',
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '50%',
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#2563eb';
+                  e.currentTarget.style.transform = 'scale(1.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#3b82f6';
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+                title="カードを回転"
               >
-                {info?.title}
-              </div>
-              
+                <svg 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="2.5"
+                  strokeLinecap="round" 
+                  strokeLinejoin="round"
+                  style={{ width: '24px', height: '24px' }}
+                >
+                  <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                </svg>
+              </button>
               {/* 閉じるボタン */}
               <button
                 onClick={() => setExpandedCard(null)}
                 style={{
                   position: 'absolute',
-                  top: -16,
-                  right: -16,
-                  width: 48,
-                  height: 48,
+                  top: '-16px',
+                  right: '-16px',
+                  width: '48px',
+                  height: '48px',
                   borderRadius: '50%',
-                  background: '#fff',
+                  backgroundColor: '#ef4444',
+                  color: 'white',
                   border: 'none',
-                  fontSize: 24,
                   cursor: 'pointer',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                  fontSize: '24px',
+                  fontWeight: 'bold',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontWeight: 700,
-                  color: '#111827',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                  transition: 'all 0.2s',
                 }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#dc2626';
+                  e.currentTarget.style.transform = 'scale(1.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#ef4444';
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+                title="閉じる"
               >
-                ×
+                ✕
               </button>
             </div>
           </div>

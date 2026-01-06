@@ -75,6 +75,7 @@
 .largeCard {
   width: fit-content;
   cursor: pointer;
+  position: relative;
 }
 .largeCard img {
   width: 240px;

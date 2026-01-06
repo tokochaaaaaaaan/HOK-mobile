@@ -152,7 +152,7 @@ export default function WaitingPage() {
 
   const roomId = (params?.roomId as string) || "";
 
-  // 40枚のカード定義（USJ画像スキーマに合わせ）
+  // 39枚のカード定義（USJ画像スキーマに合わせ）
   const cardTitles = [
     "ジョーズ",
     "アミティ・ボードウォーク・ゲーム",
@@ -183,7 +183,6 @@ export default function WaitingPage() {
     "シング・オン・ツアー",
     "スタジオ・スターズ・レストラン",
     "ビバリーヒルズ・ブランジェリー",
-    "鬼滅の刃 XRライド ~刀鍛冶の里を疾走せよ~",
     "ハローキティのコーナーカフェ",
     "スヌーピー・バックロット・カフェ",
     "ハローキティのリボン・コレクション",
@@ -198,7 +197,7 @@ export default function WaitingPage() {
 
   const allCards: CardInfo[] = useMemo(
     () =>
-      Array.from({ length: 40 }, (_, i) => {
+      Array.from({ length: 39 }, (_, i) => {
         const idx = i + 1;
         return {
           id: `card${idx}`,
@@ -538,6 +537,26 @@ export default function WaitingPage() {
     selectedIcon: null,
     customReason: "",
     flipped: false,
+  });
+  
+  // カード拡大表示用の state
+  const [cardZoomView, setCardZoomView] = useState<{
+    isOpen: boolean;
+    card: CardInfo | null;
+    flipped: boolean;
+  }>({
+    isOpen: false,
+    card: null,
+    flipped: false,
+  });
+
+  // カテゴリ展開状態
+  const [expandedCategories, setExpandedCategories] = useState<Record<CategoryType, boolean>>({
+    veryWant: true,
+    want: true,
+    neutral: true,
+    dont: true,
+    veryDont: true,
   });
 
   // --- 特に〜から他カテゴリへ出すときの確認ダイアログ ---
@@ -965,57 +984,126 @@ export default function WaitingPage() {
     const isActiveDrop = picked.card !== null && dropZone === category;
     const color = CAT_COLORS[category];
     const border = isActiveDrop ? `3px solid ${color.active}` : `2px solid ${color.base}`;
-    const bg = isActiveDrop ? color.bgActive : color.bg; // 常時薄い背景、アクティブ時は濃く
+    const bg = isActiveDrop ? color.bgActive : color.bg;
+    const isExpanded = expandedCategories[category];
 
     return (
       <div
-        onMouseEnter={() => { if (picked.card && !reasonModal.isOpen) setDropZone(category); }}
-        onMouseLeave={() => { if (picked.card && !reasonModal.isOpen) setDropZone(null); }}
-        onClick={() => { if (picked.card && !reasonModal.isOpen) attemptDropToCategory(category); }}
         style={{
-          flex: 1,
-          minHeight: 240,
-          padding: 12,
           borderRadius: 12,
           border,
           background: bg,
           transition: "all .12s ease-in-out",
-          pointerEvents: interactionLocked || reasonModal.isOpen ? "none" : "auto",
+          overflow: "hidden",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <strong style={{ color: color.label }}>{CATEGORY_LABEL[category]}</strong>
-          {isActiveDrop && <span style={{ fontSize: 12, color: color.active }}>ここをクリックで配置</span>}
+        {/* ヘッダー：展開/折り畳みボタン */}
+        <div
+          onClick={() =>
+            setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }))
+          }
+          style={{
+            padding: "12px 16px",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            userSelect: "none",
+            transition: "background 0.2s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = isActiveDrop ? color.bgActive : `rgba(0,0,0,0.02)`;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          {/* 展開アイコン */}
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke={color.label}
+            strokeWidth="2"
+            style={{
+              transition: "transform 0.3s",
+              transform: isExpanded ? "rotate(0deg)" : "rotate(-90deg)",
+            }}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+          
+          <strong style={{ color: color.label, flex: 1 }}>
+            {CATEGORY_LABEL[category]}
+          </strong>
+          
+          {/* カード数表示 */}
+          <span
+            style={{
+              fontSize: "0.85rem",
+              fontWeight: "bold",
+              color: color.base,
+              backgroundColor: "rgba(255,255,255,0.6)",
+              padding: "2px 8px",
+              borderRadius: 4,
+            }}
+          >
+            {cards.length}枚
+          </span>
+          
+          {isActiveDrop && (
+            <span style={{ fontSize: 12, color: color.active }}>配置可</span>
+          )}
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {/* 左端の配置プレースホルダ（周囲は点線のまま） */}
+
+        {/* コンテンツ：展開時のみ表示 */}
+        {isExpanded && (
           <div
             onMouseEnter={() => { if (picked.card && !reasonModal.isOpen) setDropZone(category); }}
             onMouseLeave={() => { if (picked.card && !reasonModal.isOpen) setDropZone(null); }}
-            onClick={(e) => { e.stopPropagation(); if (picked.card && !reasonModal.isOpen) attemptDropToCategory(category); }}
-            title={picked.card ? "ここに配置" : "カードを選ぶとここに配置できます"}
-            aria-label="配置可能プレースホルダ"
+            onClick={() => { if (picked.card && !reasonModal.isOpen) attemptDropToCategory(category); }}
             style={{
-              width: 120,
-              borderRadius: 8,
-              padding: 8,
-              border: `2px dotted ${color.base}`,
-              background: isActiveDrop ? color.bgActive : "#fff",
-              color: color.label,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              height: 120 * (2/3) + 16, // 画像枠相当の高さ + パディング目安
-              cursor: picked.card && !interactionLocked ? "pointer" : "default",
-              userSelect: "none",
+              padding: "12px 16px",
+              pointerEvents: interactionLocked || reasonModal.isOpen ? "none" : "auto",
             }}
           >
-            配置可能
+            <div style={{ 
+              display: "grid",
+              gridTemplateColumns: "repeat(6, 128px)",
+              gap: 8,
+            }}>
+              {/* 左端の配置プレースホルダ */}
+              <div
+                onMouseEnter={() => { if (picked.card && !reasonModal.isOpen) setDropZone(category); }}
+                onMouseLeave={() => { if (picked.card && !reasonModal.isOpen) setDropZone(null); }}
+                onClick={(e) => { e.stopPropagation(); if (picked.card && !reasonModal.isOpen) attemptDropToCategory(category); }}
+                title={picked.card ? "ここに配置" : "カードを選ぶとここに配置できます"}
+                aria-label="配置可能プレースホルダ"
+                style={{
+                  borderRadius: 8,
+                  padding: 8,
+                  border: `2px dotted ${color.base}`,
+                  background: isActiveDrop ? color.bgActive : "#fff",
+                  color: color.label,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minHeight: "120px",
+                  cursor: picked.card && !interactionLocked ? "pointer" : "default",
+                  userSelect: "none",
+                }}
+              >
+                配置可能
+              </div>
+              
+              {/* 全カード表示 - 6枚ずつ行を分ける */}
+              {cards.sort(sortByIdNumber).map((c) => (
+                <CardItem key={c.id} card={c} category={category} />
+              ))}
+            </div>
           </div>
-          {cards.sort(sortByIdNumber).map((c) => (
-            <CardItem key={c.id} card={c} category={category} />
-          ))}
-        </div>
+        )}
       </div>
     );
   }
@@ -1305,8 +1393,8 @@ export default function WaitingPage() {
           </div>
         )}
 
-        {/* 5カテゴリレイアウト */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        {/* 5カテゴリレイアウト - 1列で折り畳み可能 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <CategorySection category="veryWant" cards={categories.veryWant} />
           <CategorySection category="want" cards={categories.want} />
           <CategorySection category="neutral" cards={categories.neutral} />
@@ -1361,11 +1449,29 @@ export default function WaitingPage() {
             {/* メインコンテンツ */}
             <div style={{ flex: 1, display: "flex", gap: 24 }}>
               {/* 左側：カード表示 */}
-              <div style={{ flex: "0 0 240px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <div
+                style={{
+                  flex: "0 0 240px",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "12px",
+                }}
+              >
                 <div className={styles.cardPreview}>
                   <div
                     className={`${styles.cardPreviewInner} ${reasonModal.flipped ? styles.flipped : ""}`}
-                    onClick={() => setReasonModal((p) => ({ ...p, flipped: !p.flipped }))}
+                    onClick={() => {
+                      setCardZoomView({
+                        isOpen: true,
+                        card: reasonModal.card,
+                        flipped: reasonModal.flipped,
+                      });
+                    }}
+                    style={{
+                      cursor: "pointer",
+                      position: "relative",
+                    }}
                   >
                     <div className={styles.cardFace}>
                       <img
@@ -1379,25 +1485,93 @@ export default function WaitingPage() {
                         alt={reasonModal.card.title}
                       />
                     </div>
-                    {/* 回転インジケーター */}
-                    <div className={styles.flipIndicator}>
+                    {/* ズームインジケーター */}
+                    <div 
+                      style={{
+                        position: "absolute",
+                        top: "8px",
+                        right: "8px",
+                        width: "32px",
+                        height: "32px",
+                        backgroundColor: "rgba(59, 130, 246, 0.9)",
+                        borderRadius: "50%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                        pointerEvents: "none",
+                      }}
+                    >
                       <svg 
-                        className={styles.rotateIcon}
                         viewBox="0 0 24 24" 
                         fill="none" 
-                        stroke="#3b82f6" 
+                        stroke="white" 
                         strokeWidth="2.5"
                         strokeLinecap="round" 
                         strokeLinejoin="round"
+                        style={{ width: "20px", height: "20px" }}
                       >
-                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                        <circle cx="11" cy="11" r="8"/>
+                        <path d="m21 21-4.35-4.35"/>
+                        <line x1="11" y1="8" x2="11" y2="14"/>
+                        <line x1="8" y1="11" x2="14" y2="11"/>
                       </svg>
                     </div>
                   </div>
                 </div>
-                <div style={{ fontSize: "1rem", fontWeight: "bold", textAlign: "center" }}>
+                <div
+                  style={{
+                    fontSize: "1rem",
+                    fontWeight: "bold",
+                    textAlign: "center",
+                  }}
+                >
                   {reasonModal.card.title}
                 </div>
+                {/* 回転ボタン */}
+                <button
+                  onClick={() =>
+                    setReasonModal(prev => ({ ...prev, flipped: !prev.flipped }))
+                  }
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: "#3b82f6",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    fontSize: "0.9rem",
+                    fontWeight: "bold",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = "#2563eb";
+                    e.currentTarget.style.transform = "translateY(-1px)";
+                    e.currentTarget.style.boxShadow = "0 4px 8px rgba(0,0,0,0.3)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "#3b82f6";
+                    e.currentTarget.style.transform = "translateY(0)";
+                    e.currentTarget.style.boxShadow = "0 2px 4px rgba(0,0,0,0.2)";
+                  }}
+                >
+                  <svg 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="2.5"
+                    strokeLinecap="round" 
+                    strokeLinejoin="round"
+                    style={{ width: "18px", height: "18px" }}
+                  >
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                  </svg>
+                  {reasonModal.flipped ? "表に戻す" : "裏返す"}
+                </button>
               </div>
 
               {/* 右側：アイコン選択 */}
@@ -1476,6 +1650,137 @@ export default function WaitingPage() {
                 戻る
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* カード拡大表示モーダル */}
+      {cardZoomView.isOpen && cardZoomView.card && (
+        <div
+          onClick={() =>
+            setCardZoomView({ isOpen: false, card: null, flipped: false })
+          }
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            backgroundColor: "rgba(0, 0, 0, 0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 4000,
+            cursor: "pointer",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: "90vw",
+              maxHeight: "90vh",
+              position: "relative",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={
+                cardZoomView.flipped
+                  ? cardZoomView.card.backSrc
+                  : cardZoomView.card.src
+              }
+              alt={cardZoomView.card.title}
+              onClick={() =>
+                setCardZoomView(prev => ({ ...prev, flipped: !prev.flipped }))
+              }
+              style={{
+                maxWidth: "100%",
+                maxHeight: "90vh",
+                objectFit: "contain",
+                borderRadius: "12px",
+                boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
+                cursor: "pointer",
+              }}
+            />
+            {/* 回転ボタン */}
+            <button
+              onClick={() =>
+                setCardZoomView(prev => ({ ...prev, flipped: !prev.flipped }))
+              }
+              style={{
+                position: "absolute",
+                bottom: "-16px",
+                right: "-16px",
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                backgroundColor: "#3b82f6",
+                color: "white",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
+                transition: "all 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "#2563eb";
+                e.currentTarget.style.transform = "scale(1.1)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "#3b82f6";
+                e.currentTarget.style.transform = "scale(1)";
+              }}
+              title="カードを回転"
+            >
+              <svg 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2.5"
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+                style={{ width: "24px", height: "24px" }}
+              >
+                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+              </svg>
+            </button>
+            {/* 閉じるボタン */}
+            <button
+              onClick={() =>
+                setCardZoomView({ isOpen: false, card: null, flipped: false })
+              }
+              style={{
+                position: "absolute",
+                top: "-16px",
+                right: "-16px",
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                backgroundColor: "#ef4444",
+                color: "white",
+                border: "none",
+                cursor: "pointer",
+                fontSize: "24px",
+                fontWeight: "bold",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
+                transition: "all 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "#dc2626";
+                e.currentTarget.style.transform = "scale(1.1)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "#ef4444";
+                e.currentTarget.style.transform = "scale(1)";
+              }}
+              title="閉じる"
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}

@@ -7,6 +7,7 @@ import { agreementOverall, convertSelectionsToMatrix } from '../../../../utils/a
 import { db } from '../../../../../lib/firebase';
 import { normalizeCategories } from '../../../../utils/normalizeCategories';
 import MapButton from '@/components/MapButton';
+import { useUser } from '@/context/UserContext';
 
 // 理由アイコンの定義
 const reasonIcons = [
@@ -56,7 +57,6 @@ const cardTitles = [
   "シング・オン・ツアー",
   "スタジオ・スターズ・レストラン",
   "ビバリーヒルズ・ブランジェリー",
-  "鬼滅の刃 XRライド ~刀鍛冶の里を疾走せよ~",
   "ハローキティのコーナーカフェ",
   "スヌーピー・バックロット・カフェ",
   "ハローキティのリボン・コレクション",
@@ -70,7 +70,7 @@ const cardTitles = [
 ];
 
 // カード定義（play3 と揃える）
-const allCards = Array.from({ length: 40 }, (_, i) => {
+const allCards = Array.from({ length: 39 }, (_, i) => {
   const idx = i + 1;
   return {
     id: `card${idx}`,
@@ -113,6 +113,7 @@ const SECTION_ORDER: Array<{ key: string; label: string; color: string; border: 
 
 export default function ResultPage() {
   const { roomId } = useParams();
+  const { userName: currentUserName } = useUser();
   const [selections, setSelections] = useState<UserSelection[]>([]);
   const [goIds, setGoIds] = useState<string[]>([]);
   const [noIds, setNoIds] = useState<string[]>([]);
@@ -233,7 +234,7 @@ export default function ResultPage() {
 
   // 全カード一覧のため、全カードに対する最終カテゴリを決定
   const allCardsWithFinalCategory = useMemo(() => {
-    const ALL_CARDS = Array.from({ length: 40 }, (_, i) => `card${i + 1}`);
+    const ALL_CARDS = Array.from({ length: 39 }, (_, i) => `card${i + 1}`);
     return ALL_CARDS.map(cardId => {
       let finalCategory = 'unassigned';
       if (goIds.includes(cardId)) finalCategory = 'go';
@@ -273,7 +274,7 @@ export default function ResultPage() {
         veryDont: s.categories.veryDont,
       }
     }));
-    const matrix = convertSelectionsToMatrix(pseudo as any, 40);
+    const matrix = convertSelectionsToMatrix(pseudo as any, 39);
     const overall = agreementOverall(matrix);
     setOverallAgreement(overall);
   }, [selections]);
@@ -303,11 +304,14 @@ export default function ResultPage() {
   // アバター表示
   const renderAvatars = () => (
     <div style={{ display: 'flex', gap: 8 }}>
-      {participantStats.map(p => (
-        <button key={p.userId} onClick={() => setActiveUserInfo(p.userId)} title={p.userName} style={{ width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb', background: '#fff', boxShadow: '0 2px 6px rgba(0,0,0,0.08)', fontWeight: 800, color: '#111827' }}>
-          {p.userName?.[0] || '?'}
-        </button>
-      ))}
+      {participantStats.map(p => {
+        const isSelf = p.userName === currentUserName;
+        return (
+          <button key={p.userId} onClick={() => setActiveUserInfo(p.userId)} title={p.userName} style={{ width: 32, height: 32, borderRadius: '50%', border: isSelf ? '2px solid #ef4444' : '1px solid #e5e7eb', background: '#fff', boxShadow: '0 2px 6px rgba(0,0,0,0.08)', fontWeight: 800, color: '#111827' }}>
+            {p.userName?.[0] || '?'}
+          </button>
+        );
+      })}
     </div>
   );
 
@@ -315,16 +319,16 @@ export default function ResultPage() {
     const info = getCardInfo(cardId);
     const users = cardChoiceMap[cardId]?.users || [];
     return (
-      <div key={cardId} style={{ width: 200, flex: '0 0 auto', border: '1px solid #e5e7eb', background: '#fff', borderRadius: 14, padding: 8, boxShadow: '0 4px 10px -4px rgba(15,23,42,0.15)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4 }} onClick={() => setCardModal(cardId)}>
+      <div key={cardId} style={{ width: 200, flex: '0 0 auto', border: '1px solid #e5e7eb', background: '#fff', borderRadius: 10, padding: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4 }} onClick={() => setCardModal(cardId)}>
         <div style={{ width: '100%', aspectRatio: '3/2', background: '#f8fafc', borderRadius: 10, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <img src={info?.src} alt="card" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         </div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{info?.title}</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{info?.title}</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 3 }}>
           {users.map(u => {
             const style = categoryChipStyle[u.category] || categoryChipStyle.neutral;
             return (
-              <div key={u.userId} style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}`, borderRadius: 9999, padding: '2px 6px', fontSize: 10, fontWeight: 700 }}>{u.userName}</div>
+              <div key={u.userId} style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}`, borderRadius: 9999, padding: '1px 5px', fontSize: 9, fontWeight: 700 }}>{u.userName}</div>
             );
           })}
         </div>
@@ -521,31 +525,31 @@ export default function ResultPage() {
               <button onClick={() => setAllCardsModalOpen(false)} style={{ padding: '8px 16px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontWeight: 700, color: '#374151', cursor: 'pointer' }}>閉じる</button>
             </div>
             <div style={{ padding: 20, overflowY: 'auto', maxHeight: 'calc(90vh - 80px)' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
                 {allCardsWithFinalCategory.map(({ cardId, finalCategory, users }) => {
                   const info = getCardInfo(cardId);
                   const finalStyle = categoryChipStyle[finalCategory] || categoryChipStyle.unassigned;
                   return (
-                    <div key={cardId} style={{ border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+                    <div key={cardId} style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
                       <div style={{ width: '100%', aspectRatio: '3/2', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <img src={info?.src} alt={info?.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       </div>
-                      <div style={{ padding: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <div style={{ fontWeight: 800, color: '#0f172a' }}>{info?.title}</div>
-                          <div style={{ background: finalStyle.bg, color: finalStyle.text, border: `1px solid ${finalStyle.border}`, borderRadius: 9999, padding: '2px 8px', fontSize: 11, fontWeight: 800 }}>
+                      <div style={{ padding: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
+                          <div style={{ fontWeight: 800, color: '#111827', fontSize: 12, lineHeight: 1.3, flex: 1 }}>{info?.title}</div>
+                          <div style={{ background: finalStyle.bg, color: finalStyle.text, border: `1px solid ${finalStyle.border}`, borderRadius: 9999, padding: '2px 6px', fontSize: 10, fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>
                             {categoryNames[finalCategory]}
                           </div>
                         </div>
-                        <div style={{ display: 'grid', gap: 6 }}>
+                        <div style={{ display: 'grid', gap: 4 }}>
                           {users.length > 0 ? users.map(u => {
                             const style = categoryChipStyle[u.category] || categoryChipStyle.neutral;
                             const showReason = u.reason && (u.category === 'veryWant' || u.category === 'veryDont');
                             return (
-                              <div key={u.userId} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 8 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                  <div style={{ fontWeight: 700, fontSize: 12, color: '#0f172a' }}>{u.userName}</div>
-                                  <div style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}`, borderRadius: 9999, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>
+                              <div key={u.userId} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 6 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3, gap: 4 }}>
+                                  <div style={{ fontWeight: 700, fontSize: 10, color: '#111827' }}>{u.userName}</div>
+                                  <div style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}`, borderRadius: 9999, padding: '1px 5px', fontSize: 9, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>
                                     {categoryNames[u.category]}
                                   </div>
                                 </div>
@@ -612,7 +616,7 @@ export default function ResultPage() {
               </div>
               <div style={{ padding: 20, overflowY: 'auto', maxHeight: 'calc(90vh - 100px)' }}>
                 {categoryList.length > 0 ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
                     {categoryList.map((card, index) => {
                       const info = getCardInfo(card.id);
                       const reason = (card as any).reason || '';
@@ -651,45 +655,48 @@ export default function ResultPage() {
                           key={index} 
                           onClick={() => setExpandedCard({ id: card.id, flipped: false })}
                           style={{ 
-                            border: `2px solid ${categoryStyle.border}`, 
-                            borderRadius: 12, 
+                            border: `1px solid #e5e7eb`, 
+                            borderRadius: 10, 
                             overflow: 'hidden', 
                             background: '#fff',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
                             cursor: 'pointer',
                             transition: 'transform 0.2s, box-shadow 0.2s'
                           }}
                           onMouseEnter={(e) => {
-                            e.currentTarget.style.transform = 'translateY(-4px)';
-                            e.currentTarget.style.boxShadow = '0 8px 20px rgba(0,0,0,0.15)';
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)';
                           }}
                           onMouseLeave={(e) => {
                             e.currentTarget.style.transform = 'translateY(0)';
-                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)';
                           }}
                         >
                           <div style={{ width: '100%', aspectRatio: '3/2', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <img src={info?.src} alt={info?.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           </div>
-                          <div style={{ padding: 12 }}>
+                          <div style={{ padding: 10 }}>
                             <div style={{ 
                               fontWeight: 800, 
-                              fontSize: 16, 
-                              color: '#0f172a', 
-                              marginBottom: 8,
+                              fontSize: 12, 
+                              color: '#111827', 
+                              marginBottom: 6,
                               display: 'flex',
                               justifyContent: 'space-between',
-                              alignItems: 'center'
+                              alignItems: 'flex-start',
+                              gap: 6
                             }}>
-                              <span>{info?.title}</span>
+                              <span style={{ lineHeight: 1.3 }}>{info?.title}</span>
                               <div style={{ 
                                 background: categoryStyle.bg, 
                                 color: categoryStyle.text, 
                                 border: `1px solid ${categoryStyle.border}`, 
                                 borderRadius: 9999, 
-                                padding: '2px 8px', 
-                                fontSize: 11, 
-                                fontWeight: 800 
+                                padding: '2px 6px', 
+                                fontSize: 10, 
+                                fontWeight: 800,
+                                whiteSpace: 'nowrap',
+                                flexShrink: 0
                               }}>
                                 {categoryName}
                               </div>
@@ -698,19 +705,19 @@ export default function ResultPage() {
                               <div style={{ 
                                 background: '#f9fafb', 
                                 border: '1px solid #e5e7eb', 
-                                borderRadius: 8, 
-                                padding: '8px 10px',
-                                marginTop: 8,
+                                borderRadius: 6, 
+                                padding: '6px 8px',
+                                marginTop: 6,
                                 display: 'flex',
                                 alignItems: 'center',
-                                gap: 8
+                                gap: 6
                               }}>
                                 {displayEmoji && (
-                                  <span style={{ fontSize: 18, flexShrink: 0 }}>
+                                  <span style={{ fontSize: 14, flexShrink: 0 }}>
                                     {displayEmoji}
                                   </span>
                                 )}
-                                <div style={{ fontSize: 13, color: '#374151', fontWeight: 600, lineHeight: 1.5, flex: 1 }}>
+                                <div style={{ fontSize: 11, color: '#374151', fontWeight: 600, lineHeight: 1.4, flex: 1 }}>
                                   {displayText}
                                 </div>
                               </div>

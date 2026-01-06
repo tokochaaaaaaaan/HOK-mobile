@@ -16,16 +16,12 @@
 }
 
 .scaleWrapper {
-  transform-origin: top center;
   width: 100%;
   height: 100%;
-  margin: 0 auto;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  /* overflow: hidden; をやめる */
-  overflow-x: hidden;
-  overflow-y: visible;
+  overflow: hidden;
 }
 
 /* Header */
@@ -33,7 +29,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 20px;
+  padding: 12px 16px;
   border-bottom: 1px solid #e5e7eb;
   flex-shrink: 0;
 }
@@ -41,28 +37,26 @@
 .agreementRate {
   font-weight: 900;
   color: #111827;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 /* Start Message */
 .startMessage {
-  padding: 8px 20px;
+  padding: 6px 16px;
   background: #fffbeb;
   border-bottom: 1px solid #fde68a;
   color: #92400e;
   font-weight: 700;
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 /* Main Grid */
 .mainGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 12px;
-  padding: 12px;
-  
-  /* 追加：横に押し出されないように */
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px;
+  padding: 10px;
   min-width: 0;
 }
 
@@ -81,15 +75,14 @@
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  overflow: hidden;
-  
-  /* 追加：固定フッター（終了ボタン）と MapButton の被り回避 */
-  padding-bottom: 80px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 70px;
 }
 
 /* Section Wrapper - 各セクションのラッパー */
 .sectionWrapper {
-  padding: 0 12px 12px;
+  padding: 0 10px 10px;
   min-width: 0;
   overflow: visible;
   box-sizing: border-box;
@@ -100,8 +93,8 @@
   min-width: 0;
   background: #fee2e2;
   border: 2px solid #fca5a5;
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: 10px;
+  padding: 10px;
   box-sizing: border-box;
   cursor: pointer;
 }
@@ -110,7 +103,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   cursor: pointer;
 }
 
@@ -122,13 +115,13 @@
 .sectionTitleGo {
   font-weight: 900;
   color: #7f1d1d;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 .sectionCountGo {
   color: #7f1d1d;
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 /* Section - 行かない (No Go) */
@@ -136,8 +129,8 @@
   min-width: 0;
   background: #1e3a8a;
   border: 2px solid #334155;
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: 10px;
+  padding: 10px;
   box-sizing: border-box;
   cursor: pointer;
 }
@@ -145,13 +138,13 @@
 .sectionTitleNoGo {
   font-weight: 900;
   color: #fff;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 .sectionCountNoGo {
   color: #e2e8f0;
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 /* Section - 保留 (Pending) */
@@ -178,8 +171,8 @@
   min-width: 0;
   background: #ffedd5;
   border: 2px solid #fdba74;
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: 10px;
+  padding: 10px;
   margin: 0;
   position: relative;
   box-sizing: border-box;
@@ -189,13 +182,13 @@
 .sectionTitleVs {
   font-weight: 900;
   color: #9a3412;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 .sectionCountVs {
   color: #9a3412;
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 /* Section - どちらでも (Neutral) */
@@ -203,7 +196,7 @@
   min-width: 0;
   background: #e5e7eb;
   border: 2px solid #d1d5db;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   margin: 0;
   cursor: pointer;
@@ -213,7 +206,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
+  padding: 12px;
   cursor: pointer;
 }
 
@@ -224,25 +217,23 @@
 .sectionTitleNeutral {
   font-weight: 900;
   color: #4b5563;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 .sectionCountNeutral {
   color: #6b7280;
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 /* Card Container */
 .cardContainer {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
   flex-wrap: nowrap;
-  
-  /* 追加：ここが効くと、セクションが横に伸びなくなる */
   min-width: 0;
   width: 100%;
   max-width: 100%;
@@ -278,7 +269,7 @@
 }
 
 .cardInfo {
-  padding: 8px 10px;
+  padding: 6px 8px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -287,18 +278,18 @@
 .cardTitle {
   font-weight: 800;
   color: #111827;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .cardAgreement {
   font-weight: 900;
   color: #fff;
-  font-size: 14px;
+  font-size: 12px;
   background: linear-gradient(135deg, #0ea5e9, #3b82f6);
-  padding: 4px 10px;
+  padding: 3px 8px;
   border-radius: 20px;
   box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
-  min-width: 50px;
+  min-width: 45px;
   text-align: center;
 }
 

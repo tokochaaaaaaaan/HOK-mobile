@@ -186,6 +186,17 @@ export default function Play2Page() {
     customReason: "",
   });
 
+  // カードズーム表示用の状態管理
+  const [cardZoomView, setCardZoomView] = useState<{
+    isOpen: boolean;
+    cardInfo: CardInfo | null;
+    isFlipped: boolean;
+  }>({
+    isOpen: false,
+    cardInfo: null,
+    isFlipped: false,
+  });
+
   const openReasonModal = (cardId: string) => {
     const cardInfo = allCards.find(c => c.id === cardId) || null;
     const existingReason = reasons[cardId];
@@ -1267,14 +1278,23 @@ export default function Play2Page() {
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
+                  gap: "12px",
                 }}
               >
                 <div className={styles.cardPreview}>
                   <div
                     className={`${styles.cardPreviewInner} ${reasonModal.isFlipped ? styles.flipped : ""}`}
-                    onClick={() =>
-                      setReasonModal(prev => ({ ...prev, isFlipped: !prev.isFlipped }))
-                    }
+                    onClick={() => {
+                      setCardZoomView({
+                        isOpen: true,
+                        cardInfo: reasonModal.cardInfo,
+                        isFlipped: reasonModal.isFlipped,
+                      });
+                    }}
+                    style={{
+                      cursor: "pointer",
+                      position: "relative",
+                    }}
                   >
                     <div className={styles.cardFace}>
                       <img
@@ -1288,18 +1308,36 @@ export default function Play2Page() {
                         alt={reasonModal.cardInfo.title}
                       />
                     </div>
-                    {/* 回転インジケーター */}
-                    <div className={styles.flipIndicator}>
+                    {/* ズームインジケーター */}
+                    <div 
+                      style={{
+                        position: "absolute",
+                        top: "8px",
+                        right: "8px",
+                        width: "32px",
+                        height: "32px",
+                        backgroundColor: "rgba(59, 130, 246, 0.9)",
+                        borderRadius: "50%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                        pointerEvents: "none",
+                      }}
+                    >
                       <svg 
-                        className={styles.rotateIcon}
                         viewBox="0 0 24 24" 
                         fill="none" 
-                        stroke="#3b82f6" 
+                        stroke="white" 
                         strokeWidth="2.5"
                         strokeLinecap="round" 
                         strokeLinejoin="round"
+                        style={{ width: "20px", height: "20px" }}
                       >
-                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                        <circle cx="11" cy="11" r="8"/>
+                        <path d="m21 21-4.35-4.35"/>
+                        <line x1="11" y1="8" x2="11" y2="14"/>
+                        <line x1="8" y1="11" x2="14" y2="11"/>
                       </svg>
                     </div>
                   </div>
@@ -1313,6 +1351,50 @@ export default function Play2Page() {
                 >
                   {reasonModal.cardInfo.title}
                 </div>
+                {/* 回転ボタン */}
+                <button
+                  onClick={() =>
+                    setReasonModal(prev => ({ ...prev, isFlipped: !prev.isFlipped }))
+                  }
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: "#3b82f6",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    fontSize: "0.9rem",
+                    fontWeight: "bold",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = "#2563eb";
+                    e.currentTarget.style.transform = "translateY(-1px)";
+                    e.currentTarget.style.boxShadow = "0 4px 8px rgba(0,0,0,0.3)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "#3b82f6";
+                    e.currentTarget.style.transform = "translateY(0)";
+                    e.currentTarget.style.boxShadow = "0 2px 4px rgba(0,0,0,0.2)";
+                  }}
+                >
+                  <svg 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="2.5"
+                    strokeLinecap="round" 
+                    strokeLinejoin="round"
+                    style={{ width: "18px", height: "18px" }}
+                  >
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                  </svg>
+                  {reasonModal.isFlipped ? "表に戻す" : "裏返す"}
+                </button>
               </div>
 
               {/* 右側：アイコン選択 */}
@@ -1373,6 +1455,137 @@ export default function Play2Page() {
                 戻る
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* カードズーム表示モーダル */}
+      {cardZoomView.isOpen && cardZoomView.cardInfo && (
+        <div
+          onClick={() =>
+            setCardZoomView({ isOpen: false, cardInfo: null, isFlipped: false })
+          }
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            backgroundColor: "rgba(0, 0, 0, 0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 4000,
+            cursor: "pointer",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: "70vw",
+              maxHeight: "70vh",
+              position: "relative",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={
+                cardZoomView.isFlipped
+                  ? cardZoomView.cardInfo.backSrc
+                  : cardZoomView.cardInfo.src
+              }
+              alt={cardZoomView.cardInfo.title}
+              onClick={() =>
+                setCardZoomView(prev => ({ ...prev, isFlipped: !prev.isFlipped }))
+              }
+              style={{
+                maxWidth: "100%",
+                maxHeight: "70vh",
+                objectFit: "contain",
+                borderRadius: "12px",
+                boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
+                cursor: "pointer",
+              }}
+            />
+            {/* 回転ボタン */}
+            <button
+              onClick={() =>
+                setCardZoomView(prev => ({ ...prev, isFlipped: !prev.isFlipped }))
+              }
+              style={{
+                position: "absolute",
+                bottom: "-16px",
+                right: "-16px",
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                backgroundColor: "#3b82f6",
+                color: "white",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
+                transition: "all 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "#2563eb";
+                e.currentTarget.style.transform = "scale(1.1)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "#3b82f6";
+                e.currentTarget.style.transform = "scale(1)";
+              }}
+              title="カードを回転"
+            >
+              <svg 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2.5"
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+                style={{ width: "24px", height: "24px" }}
+              >
+                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+              </svg>
+            </button>
+            {/* 閉じるボタン */}
+            <button
+              onClick={() =>
+                setCardZoomView({ isOpen: false, cardInfo: null, isFlipped: false })
+              }
+              style={{
+                position: "absolute",
+                top: "-16px",
+                right: "-16px",
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                backgroundColor: "#ef4444",
+                color: "white",
+                border: "none",
+                cursor: "pointer",
+                fontSize: "24px",
+                fontWeight: "bold",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
+                transition: "all 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "#dc2626";
+                e.currentTarget.style.transform = "scale(1.1)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "#ef4444";
+                e.currentTarget.style.transform = "scale(1)";
+              }}
+              title="閉じる"
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}

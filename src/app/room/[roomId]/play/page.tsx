@@ -41,7 +41,7 @@ export default function PlayPage() {
   // ブラウザの戻るボタン無効化
   usePreventBack();
 
-  // カード名定義
+  // カード名定義（39枚）
   const cardTitles = [
     "ジョーズ",
     "アミティ・ボードウォーク・ゲーム",
@@ -72,7 +72,6 @@ export default function PlayPage() {
     "シング・オン・ツアー",
     "スタジオ・スターズ・レストラン",
     "ビバリーヒルズ・ブランジェリー",
-    "鬼滅の刃 XRライド ~刀鍛冶の里を疾走せよ~",
     "ハローキティのコーナーカフェ",
     "スヌーピー・バックロット・カフェ",
     "ハローキティのリボン・コレクション",
@@ -85,8 +84,8 @@ export default function PlayPage() {
     "モッピーのバルーン・トリップ",
   ];
 
-  // 初期カードプール（40枚）
-  const initialCards: PlayPageCard[] = Array.from({ length: 40 }, (_, i) => {
+  // 初期カードプール（39枚）
+  const initialCards: PlayPageCard[] = Array.from({ length: 39 }, (_, i) => {
     const idx = i + 1;
     return {
       id: `card${idx}`,
@@ -552,12 +551,51 @@ export default function PlayPage() {
             className={`${styles.largeCard} ${
               isFlipped ? styles.flipped : ""
             }`}
-            onClick={() => setIsFlipped((f) => !f)}
+              onClick={() =>
+                setCardPreview({ card: currentCard, flipped: isFlipped })
+              }
           >
             <img
               src={isFlipped ? currentCard.backSrc : currentCard.src}
               alt={currentCard.title}
             />
+
+              {/* 拡大アイコン（play2と同じ挙動でプレビューを開く） */}
+              <div
+                style={{
+                  position: "absolute",
+                  top: 8,
+                  right: 8,
+                  width: 36,
+                  height: 36,
+                  backgroundColor: "rgba(59, 130, 246, 0.9)",
+                  borderRadius: "50%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxShadow: "0 3px 10px rgba(0,0,0,0.25)",
+                  cursor: "pointer",
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCardPreview({ card: currentCard, flipped: isFlipped });
+                }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="white"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ width: 20, height: 20 }}
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.35-4.35" />
+                  <line x1="11" y1="8" x2="11" y2="14" />
+                  <line x1="8" y1="11" x2="14" y2="11" />
+                </svg>
+              </div>
           </div>
           {/* 回転インジケーター */}
           <div 
@@ -760,6 +798,38 @@ export default function PlayPage() {
                   boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
                 }}
               />
+              {/* ズームアイコン */}
+              <div
+                style={{
+                  position: "absolute",
+                  top: "16px",
+                  right: "16px",
+                  width: "40px",
+                  height: "40px",
+                  backgroundColor: "rgba(59, 130, 246, 0.9)",
+                  borderRadius: "50%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                  pointerEvents: "none",
+                }}
+              >
+                <svg 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="white" 
+                  strokeWidth="2.5"
+                  strokeLinecap="round" 
+                  strokeLinejoin="round"
+                  style={{ width: "22px", height: "22px" }}
+                >
+                  <circle cx="11" cy="11" r="8"/>
+                  <path d="m21 21-4.35-4.35"/>
+                  <line x1="11" y1="8" x2="11" y2="14"/>
+                  <line x1="8" y1="11" x2="14" y2="11"/>
+                </svg>
+              </div>
               {/* 回転アイコン */}
               <div
                 style={{
@@ -800,24 +870,6 @@ export default function PlayPage() {
             >
               {cardPreview.card.title}
             </div>
-            {/* 閉じるボタン */}
-            <button
-              onClick={() => setCardPreview(null)}
-              style={{
-                marginTop: "24px",
-                padding: "12px 32px",
-                fontSize: "1rem",
-                fontWeight: "bold",
-                backgroundColor: "#fff",
-                color: "#000",
-                border: "none",
-                borderRadius: "8px",
-                cursor: "pointer",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-              }}
-            >
-              閉じる
-            </button>
           </div>
         </div>
       )}
