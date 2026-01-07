@@ -102,7 +102,7 @@ export function convertSelectionsToMatrix(
       veryDont: Array<{id: string}>;
     };
   }>,
-  totalCards: number = 40
+  totalCards: number = 39
 ): number[][] {
   const cardMatrix: number[][] = [];
 

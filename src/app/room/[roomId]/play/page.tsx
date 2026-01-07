@@ -395,9 +395,19 @@ export default function PlayPage() {
         }}
       >
         <div style={{ marginBottom: '4px', fontSize: '0.85rem', color: '#78350f' }}>📋 条件</div>
-        <div>・行きたい{requiredWantCards}枚以上</div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            color: (currentWantCards >= requiredWantCards) ? '#065f46' : '#92400e'
+          }}
+        >
+          <span>{(currentWantCards >= requiredWantCards) ? '✅' : '⏳'}</span>
+          <span>・行きたい{requiredWantCards}枚以上</span>
+        </div>
         <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #fbbf24', fontSize: '0.75rem' }}>
-          現在: {currentWantCards}枚
+          現在: <span style={{ color: (currentWantCards >= requiredWantCards) ? '#065f46' : '#dc2626' }}>{currentWantCards}枚</span>
         </div>
       </div>
 

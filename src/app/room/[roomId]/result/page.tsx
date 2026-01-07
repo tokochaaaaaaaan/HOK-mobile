@@ -109,6 +109,7 @@ const SECTION_ORDER: Array<{ key: string; label: string; color: string; border: 
   { key: 'neutral', label: 'どちらでもいい', color: '#e5e7eb', border: '#d1d5db', collapsible: true },
   { key: 'dont', label: '行きたくない', color: '#bae6fd', border: '#93c5fd', collapsible: true },
   { key: 'veryDont', label: '特に行きたくない', color: '#93c5fd', border: '#60a5fa', collapsible: true },
+  { key: 'vs', label: '議論中（VS）', color: '#ffedd5', border: '#fdba74', collapsible: true },
 ];
 
 export default function ResultPage() {
@@ -118,6 +119,7 @@ export default function ResultPage() {
   const [goIds, setGoIds] = useState<string[]>([]);
   const [noIds, setNoIds] = useState<string[]>([]);
   const [neutralIds, setNeutralIds] = useState<string[]>([]);
+  const [vsIds, setVsIds] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [cardModal, setCardModal] = useState<string | null>(null);
   const [overallAgreement, setOverallAgreement] = useState<number>(0);
@@ -129,7 +131,7 @@ export default function ResultPage() {
 
   // 初期: go/no/neutralだけ展開
   useEffect(() => {
-    setExpanded({ go: true, no: true, neutral: true });
+    setExpanded({ go: true, no: true, neutral: true, vs: true });
   }, []);
 
   // finalSelections 購読
@@ -166,14 +168,21 @@ export default function ResultPage() {
     if (!roomId || typeof roomId !== 'string') return;
     const qAssign = query(collection(db, 'rooms', roomId, 'play3Assignments'));
     const unsub = onSnapshot(qAssign, snap => {
-      const go: string[] = []; const no: string[] = []; const neutral: string[] = [];
+      const go: string[] = [];
+      const no: string[] = [];
+      const neutral: string[] = [];
+      const vs: string[] = [];
       snap.docs.forEach(d => {
         const data: any = d.data();
         if (data?.status === 'go') go.push(d.id);
         else if (data?.status === 'no') no.push(d.id);
         else if (data?.status === 'neutral') neutral.push(d.id);
+        else if (data?.status === 'vs') vs.push(d.id);
       });
-      setGoIds(go); setNoIds(no); setNeutralIds(neutral);
+      setGoIds(go);
+      setNoIds(no);
+      setNeutralIds(neutral);
+      setVsIds(vs);
     });
     return () => unsub();
   }, [roomId]);
@@ -195,8 +204,8 @@ export default function ResultPage() {
 
   // 各セクション表示用カード（go/no/neutralに基づく最終決定を最優先表示）
   const sectionCards = useMemo(() => {
-    return { go: goIds, no: noIds, neutral: neutralIds };
-  }, [goIds, noIds, neutralIds]);
+    return { go: goIds, no: noIds, neutral: neutralIds, vs: vsIds };
+  }, [goIds, noIds, neutralIds, vsIds]);
   const uniqueSectionCards = useMemo(() => {
     const r: Record<string, string[]> = {};
     Object.entries(sectionCards).forEach(([k, arr]) => {
@@ -240,6 +249,7 @@ export default function ResultPage() {
       if (goIds.includes(cardId)) finalCategory = 'go';
       else if (noIds.includes(cardId)) finalCategory = 'no';
       else if (neutralIds.includes(cardId)) finalCategory = 'neutral';
+      else if (vsIds.includes(cardId)) finalCategory = 'vs';
       
       const users = cardChoiceMap[cardId]?.users || [];
       return { cardId, finalCategory, users };
@@ -249,7 +259,7 @@ export default function ResultPage() {
       const numB = parseInt(b.cardId.replace('card', ''), 10);
       return numA - numB;
     });
-  }, [goIds, noIds, neutralIds, cardChoiceMap]);
+  }, [goIds, noIds, neutralIds, vsIds, cardChoiceMap]);
 
   const closeUserInfoModal = () => {
     setActiveUserInfo(null);
@@ -287,6 +297,7 @@ export default function ResultPage() {
     veryDont: { bg: '#93c5fd', text: '#1e3a8a', border: '#60a5fa' },
     go: { bg: '#fecaca', text: '#991b1b', border: '#fca5a5' },      // 柔らかい赤
     no: { bg: '#dbeafe', text: '#1e40af', border: '#93c5fd' },      // 柔らかい青
+    vs: { bg: '#ffedd5', text: '#9a3412', border: '#fdba74' },      // 柔らかい橙
     unassigned: { bg: '#f3f4f6', text: '#6b7280', border: '#d1d5db' },
   };
 
@@ -298,6 +309,7 @@ export default function ResultPage() {
     veryDont: '特に行きたくない',
     go: '行く',
     no: '行かない',
+    vs: '議論中（VS）',
     unassigned: '未分類',
   };
 
@@ -456,6 +468,29 @@ export default function ResultPage() {
                 <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
                   {(uniqueSectionCards.neutral?.length || 0) > 0 ? uniqueSectionCards.neutral!.map(renderCard) : (
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>カードなし</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 議論中（VS）（柔らかい橙） */}
+          <div style={{ border: '2px solid #fdba74', background: '#ffedd5', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(251,146,60,0.35)' }}>
+            <div
+              onClick={() => setExpanded(e => ({ ...e, vs: !expanded.vs }))}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#9a3412' }}>議論中（VS）</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#c2410c', opacity: .9 }}>{uniqueSectionCards.vs?.length || 0}枚</div>
+              </div>
+              <div style={{ transform: expanded.vs ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#9a3412' }}>^</div>
+            </div>
+            <div style={{ height: expanded.vs ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.vs ? '1px solid rgba(253,186,116,0.45)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '10px 14px 20px' }}>
+                <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
+                  {(uniqueSectionCards.vs?.length || 0) > 0 ? uniqueSectionCards.vs!.map(renderCard) : (
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#c2410c' }}>カードなし</div>
                   )}
                 </div>
               </div>

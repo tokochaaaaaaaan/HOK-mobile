@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useUser } from "@/context/UserContext";
 import { usePreventBack } from "@/hooks/usePreventBack";
@@ -220,6 +220,15 @@ export default function Play3Page() {
 
   // waiting_result_lastからの最終結果データ
   const [waitingResultLast, setWaitingResultLast] = useState<Record<string, any>>({});
+  // ホスト設定の最小訪問数を取得
+  const [minStops, setMinStops] = useState<number>(6);
+  // 終了確認モーダル
+  const [showEndConfirm, setShowEndConfirm] = useState<boolean>(false);
+  // 強制終了（3秒長押し）確認モーダル
+  const [showForceEndConfirm, setShowForceEndConfirm] = useState<boolean>(false);
+  const forceEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const forceEndTriggeredRef = useRef<boolean>(false);
+
 
   // ルームに保存された参加者（id→name の辞書を rooms/{roomId} に持つ想定）
   const [roomParticipants, setRoomParticipants] = useState<
@@ -278,6 +287,21 @@ export default function Play3Page() {
     });
     return () => unsub();
   }, [roomId, normalizedUserName]);
+  // Firestoreからルーム情報（minStops）を取得
+  useEffect(() => {
+    if (!roomId || typeof roomId !== 'string') return;
+    const roomRef = doc(db, "rooms", roomId);
+    const unsub = onSnapshot(roomRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.minStops !== undefined) {
+          setMinStops(data.minStops);
+        }
+      }
+    });
+    return () => unsub();
+  }, [roomId]);
+
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1854,7 +1878,9 @@ export default function Play3Page() {
       areaDetailModal.area ||
       expandedCard ||
       categoryDetail.category ||
-      neutralOpen;
+      neutralOpen ||
+      showEndConfirm ||
+      showForceEndConfirm;
 
     if (isAnyModalOpen) {
       document.body.style.overflow = 'hidden';
@@ -1865,7 +1891,7 @@ export default function Play3Page() {
     return () => {
       document.body.style.overflow = 'auto';
     };
-  }, [activeUserInfo, areaDetailModal.area, expandedCard, categoryDetail.category, neutralOpen]);
+  }, [activeUserInfo, areaDetailModal.area, expandedCard, categoryDetail.category, neutralOpen, showEndConfirm, showForceEndConfirm]);
 
   if (isLoading) {
     return (
@@ -1888,11 +1914,37 @@ export default function Play3Page() {
     neuCount: neuSorted.length,
     uiLocked,
     uiLockReason,
-    canEndGame: vsSorted.length === 0 && !uiLocked
+    canEndGame: vsSorted.length === 0 && goSorted.length >= minStops && !uiLocked
   });
 
   // カード幅を固定
   const TILE_W = 200;
+
+  const canNormalEnd =
+    vsSorted.length === 0 &&
+    goSorted.length >= minStops &&
+    !uiLocked &&
+    !(play3Ready[myUserId] ? true : false);
+
+  const startForceEndPress = () => {
+    if (play3Ready[myUserId]) return;
+    forceEndTriggeredRef.current = false;
+    if (forceEndTimerRef.current) {
+      clearTimeout(forceEndTimerRef.current);
+      forceEndTimerRef.current = null;
+    }
+    forceEndTimerRef.current = setTimeout(() => {
+      forceEndTriggeredRef.current = true;
+      setShowForceEndConfirm(true);
+    }, 3000);
+  };
+
+  const cancelForceEndPress = () => {
+    if (forceEndTimerRef.current) {
+      clearTimeout(forceEndTimerRef.current);
+      forceEndTimerRef.current = null;
+    }
+  };
 
   return (
     <div
@@ -1903,15 +1955,60 @@ export default function Play3Page() {
       >
         {/* ヘッダー行 */}
         <div className={styles.header}>
-          <div className={styles.agreementRate}>
-            合致率 {overallAgreement.toFixed(0)}%
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                display: 'inline-block',
+                padding: '6px 10px',
+                backgroundColor: '#fef3c7',
+                color: '#92400e',
+                border: '2px solid #f59e0b',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: 'bold',
+                boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
+                lineHeight: '1.4',
+                maxWidth: '240px',
+              }}
+            >
+              <div style={{ marginBottom: '3px', fontSize: '0.8rem', color: '#78350f' }}>📋 条件</div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  color: (vsSorted.length === 0) ? '#065f46' : '#92400e'
+                }}
+              >
+                <span>{(vsSorted.length === 0) ? '✅' : '⏳'}</span>
+                <span>・「VS」のカードを0枚にしましょう！</span>
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  color: (goSorted.length >= minStops) ? '#065f46' : '#92400e'
+                }}
+              >
+                <span>{(goSorted.length >= minStops) ? '✅' : '⏳'}</span>
+                <span>・「行く」に{minStops}枚以上配置しよう！</span>
+              </div>
+              <div style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px solid #fbbf24', fontSize: '0.7rem' }}>
+                現在:
+                <span style={{ marginLeft: 4, color: (goSorted.length >= minStops) ? '#065f46' : '#dc2626' }}>行く {goIds.length}枚</span>
+                <span style={{ marginLeft: 8, color: (vsSorted.length === 0) ? '#065f46' : '#dc2626' }}>/ VS {vsIds.length}枚</span>
+              </div>
+            </div>
           </div>
-          {renderAvatars()}
-        </div>
-
-        {/* 開始メッセージ */}
-        <div className={styles.startMessage}>
-          カードを参照して、議論を行い、VSエリアのカードを0枚にしましょう！
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+              {renderAvatars()}
+              <div className={styles.agreementRate} style={{ fontSize: '0.9rem' }}>
+                合致率：{overallAgreement.toFixed(0)}％
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* スクロール可能コンテンツエリア */}
@@ -3286,113 +3383,142 @@ export default function Play3Page() {
         {/* スティッキーフッター（終了） */}
       </div>
 
-      <div
-        style={{
-          position: "fixed",
-          bottom: 16,
-          left: "50%",
-          transform: "translateX(-50%)",
-          zIndex: 80,
-        }}
-      >
+      <div className={styles.endButtonWrapper}>
         <button
-          disabled={vsSorted.length > 0 || (play3Ready[myUserId] ? true : false)}
-          onClick={async () => {
+          aria-disabled={!canNormalEnd}
+          onPointerDown={startForceEndPress}
+          onPointerUp={cancelForceEndPress}
+          onPointerLeave={cancelForceEndPress}
+          onPointerCancel={cancelForceEndPress}
+          onClick={() => {
+            // 長押しで強制終了モーダルが出た場合、clickは無視
+            if (forceEndTriggeredRef.current) {
+              forceEndTriggeredRef.current = false;
+              return;
+            }
             if (!roomId || typeof roomId !== "string" || !myUserId) return;
-            
-            console.log('終了ボタン押下:', { 
-              roomId, 
-              myUserId, 
-              normalizedUserName,
-              vsSortedLength: vsSorted.length,
-              vsIds 
-            });
-            
-            // play3Result コレクションに書き込み（ドキュメントIDはparticipantのID）
-            await setDoc(
-              doc(db, "rooms", roomId, "play3Result", myUserId),
-              {
-                userId: myUserId,
-                userName: normalizedUserName || userName,
-                ready: true,
-                completed: true,
-                updatedAt: serverTimestamp(),
-              },
-              { merge: true }
-            );
+            if (!canNormalEnd) return;
+            setShowEndConfirm(true);
           }}
-          style={{
-            opacity: vsSorted.length > 0 || uiLocked ? 0.5 : 1,
-            background: "linear-gradient(135deg,#2563eb,#4f46e5)",
-            color: "#fff",
-            fontWeight: 900,
-            padding: "12px 18px",
-            border: "none",
-            borderRadius: 12,
-            boxShadow: "0 10px 28px -8px rgba(37,99,235,0.55)",
-            cursor: vsSorted.length > 0 || uiLocked ? "not-allowed" : "pointer",
-          }}
+          className={`${styles.endButton} ${canNormalEnd ? styles.endButtonEnabled : styles.endButtonDisabled}`}
           title={
-            vsSorted.length > 0 
-              ? `VSカードが${vsSorted.length}枚残っています。先に決定してください。` 
-              : play3Ready[myUserId]
-              ? "既に終了ボタンを押しました。結果ページへお進みください。" 
-              : "クリックして終了し、結果ページに進む"
+            play3Ready[myUserId]
+              ? "既に終了ボタンを押しました。結果ページへお進みください。"
+              : canNormalEnd
+              ? "クリックして終了し、結果ページに進む"
+              : vsSorted.length > 0
+              ? `VSカードが${vsSorted.length}枚残っています。先に決定してください。`
+              : `「行く」カードが最低周遊数（${minStops}枚）に達していません。`
           }
         >
           終了して結果を見る
-          {vsSorted.length > 0 && ` (VS: ${vsSorted.length}枚)`}
         </button>
       </div>
 
-      {/* 全員準備完了待ちオーバーレイ（結果ページ遷移前） */}
-      {play3Ready[myUserId] &&
-        (() => {
-          // 参加者ベースでready状況を計算
-          const actualParticipantCount = displayParticipants.length;
-          const readyCount = displayParticipants.reduce((acc, participant) => {
-            return acc + (play3Ready[participant.id] ? 1 : 0);
-          }, 0);
-          
-          console.log('終了待ちカウント:', {
-            displayParticipants: displayParticipants.map(p => ({ id: p.id, name: p.name })),
-            play3Ready,
-            actualParticipantCount,
-            readyCount,
-            myUserId
-          });
-          
-          return (
-            <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(255,255,255,0.7)",
-                backdropFilter: "blur(2px)",
-                zIndex: 200,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                pointerEvents: "auto",
-              }}
-            >
-              <div
-                style={{
-                  background: "#fff",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 12,
-                  padding: 16,
-                  boxShadow: "0 10px 40px rgba(0,0,0,0.15)",
-                  fontWeight: 800,
-                  color: "#0f172a",
+      {showEndConfirm && (
+        <div className={styles.endConfirmOverlay}>
+          <div className={styles.endConfirmModal}>
+            <h2 className={styles.endConfirmTitle}>確認</h2>
+            <p className={styles.endConfirmMessage}>
+              終了して結果ページへ進みます。よろしいですか？
+            </p>
+            <div className={styles.endConfirmButtons}>
+              <button
+                onClick={async () => {
+                  if (!roomId || typeof roomId !== "string" || !myUserId) return;
+                  if (!canNormalEnd) {
+                    setShowEndConfirm(false);
+                    return;
+                  }
+                  console.log('終了ボタン確認: はい', {
+                    roomId,
+                    myUserId,
+                    normalizedUserName,
+                    vsSortedLength: vsSorted.length,
+                    vsIds
+                  });
+                  await setDoc(
+                    doc(db, "rooms", roomId, "play3Result", myUserId),
+                    {
+                      userId: myUserId,
+                      userName: normalizedUserName || userName,
+                      ready: true,
+                      completed: true,
+                      updatedAt: serverTimestamp(),
+                    },
+                    { merge: true }
+                  );
+                  setShowEndConfirm(false);
+                  router.push(`/room/${roomId}/result`);
+                }}
+                className={styles.endConfirmYes}
+              >
+                はい
+              </button>
+              <button
+                onClick={() => setShowEndConfirm(false)}
+                className={styles.endConfirmNo}
+              >
+                いいえ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showForceEndConfirm && (
+        <div className={styles.forceEndOverlay}>
+          <div className={styles.forceEndModal}>
+            <div className={styles.forceEndIcon} aria-hidden>
+              ⚠️
+            </div>
+            <div className={styles.forceEndTitle}>強制終了</div>
+            <div className={styles.forceEndMessage}>
+              条件を満たしていない状態で
+              <br />
+              結果ページへ進みます。
+              <br />
+              よろしいですか？
+            </div>
+            <div className={styles.forceEndButtons}>
+              <button
+                className={styles.forceEndYes}
+                onClick={async () => {
+                  if (!roomId || typeof roomId !== "string" || !myUserId) {
+                    setShowForceEndConfirm(false);
+                    return;
+                  }
+
+                  await setDoc(
+                    doc(db, "rooms", roomId, "play3Result", myUserId),
+                    {
+                      userId: myUserId,
+                      userName: normalizedUserName || userName,
+                      ready: true,
+                      completed: true,
+                      forced: true,
+                      updatedAt: serverTimestamp(),
+                    },
+                    { merge: true }
+                  );
+                  setShowForceEndConfirm(false);
+                  router.push(`/room/${roomId}/result`);
                 }}
               >
-                終了しました。他の参加者の終了を待っています…（
-                {readyCount}/{actualParticipantCount}）
-              </div>
+                はい
+              </button>
+              <button
+                className={styles.forceEndNo}
+                onClick={() => setShowForceEndConfirm(false)}
+              >
+                いいえ
+              </button>
             </div>
-          );
-        })()}
+          </div>
+        </div>
+      )}
+
+      {/* 終了後は待機せず result に遷移する */}
 
       {/* 投票結果表示モーダル */}
       {(() => {

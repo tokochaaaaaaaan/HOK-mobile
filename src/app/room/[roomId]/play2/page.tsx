@@ -1050,10 +1050,32 @@ export default function Play2Page() {
         }}
       >
         <div style={{ marginBottom: '4px', fontSize: '0.85rem', color: '#78350f' }}>📋 条件</div>
-        <div>・特に行きたい{Math.ceil(minStops / 2)}枚以上</div>
-        <div>・各{minStops}枚まで</div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            color: (wantSelected.size >= Math.ceil(minStops / 2)) ? '#065f46' : '#92400e'
+          }}
+        >
+          <span>{(wantSelected.size >= Math.ceil(minStops / 2)) ? '✅' : '⏳'}</span>
+          <span>・特に行きたい{Math.ceil(minStops / 2)}枚以上</span>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            color: ((wantSelected.size <= minStops) && (dontSelected.size <= minStops)) ? '#065f46' : '#dc2626'
+          }}
+        >
+          <span>{((wantSelected.size <= minStops) && (dontSelected.size <= minStops)) ? '✅' : '⚠️'}</span>
+          <span>・各{minStops}枚まで</span>
+        </div>
         <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #fbbf24', fontSize: '0.75rem' }}>
-          現在: {wantSelected.size}枚 / {dontSelected.size}枚
+          現在:
+          <span style={{ marginLeft: 4, color: (wantSelected.size >= Math.ceil(minStops / 2)) ? '#065f46' : '#dc2626' }}>{wantSelected.size}枚</span>
+          <span style={{ marginLeft: 8, color: (dontSelected.size <= minStops) ? '#065f46' : '#dc2626' }}>/ {dontSelected.size}枚</span>
         </div>
       </div>
 

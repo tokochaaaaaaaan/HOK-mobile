@@ -1310,10 +1310,32 @@ export default function WaitingPage() {
         }}
       >
         <div style={{ marginBottom: '4px', fontSize: '0.9rem', color: '#78350f' }}>📋 条件</div>
-        <div>・特に行きたいに{Math.ceil(minStops / 2)}枚以上</div>
-        <div>・特に行きたい/行きたくないは各{minStops}枚まで</div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            color: (veryWantCount >= Math.ceil(minStops / 2)) ? '#065f46' : '#92400e'
+          }}
+        >
+          <span>{(veryWantCount >= Math.ceil(minStops / 2)) ? '✅' : '⏳'}</span>
+          <span>・特に行きたいに{Math.ceil(minStops / 2)}枚以上</span>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            color: ((veryWantCount <= minStops) && (veryDontCount <= minStops)) ? '#065f46' : '#dc2626'
+          }}
+        >
+          <span>{((veryWantCount <= minStops) && (veryDontCount <= minStops)) ? '✅' : '⚠️'}</span>
+          <span>・特に行きたい/行きたくないは各{minStops}枚まで</span>
+        </div>
         <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #fbbf24', fontSize: '0.8rem' }}>
-          現在: 特に行きたい {veryWantCount}枚 / 特に行きたくない {veryDontCount}枚
+          現在:
+          <span style={{ marginLeft: 4, color: (veryWantCount >= Math.ceil(minStops / 2)) ? '#065f46' : '#dc2626' }}>特に行きたい {veryWantCount}枚</span>
+          <span style={{ marginLeft: 8, color: (veryDontCount <= minStops) ? '#065f46' : '#dc2626' }}>/ 特に行きたくない {veryDontCount}枚</span>
         </div>
       </div>
 

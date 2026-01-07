@@ -35,7 +35,6 @@ const cardTitles = [
   "シング・オン・ツアー",
   "スタジオ・スターズ・レストラン",
   "ビバリーヒルズ・ブランジェリー",
-  "鬼滅の刃 XRライド ~刀鍛冶の里を疾走せよ~",
   "ハローキティのコーナーカフェ",
   "スヌーピー・バックロット・カフェ",
   "ハローキティのリボン・コレクション",
@@ -48,7 +47,7 @@ const cardTitles = [
   "モッピーのバルーン・トリップ",
 ];
 
-export const cards: CardData[] = Array.from({ length: 40 }, (_, i) => {
+export const cards: CardData[] = Array.from({ length: 39 }, (_, i) => {
   const id = i + 1;
   return {
     id,
