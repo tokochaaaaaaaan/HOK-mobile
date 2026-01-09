@@ -1369,16 +1369,16 @@ export default function WaitingPage() {
           <div style={{ marginTop: 14 }}>
             <button
               onClick={handleFinishClick}
-              disabled={selfReady || isSaving}
+              disabled={selfReady || isSaving || veryWantCount < Math.ceil(minStops / 2) || veryWantCount > minStops || veryDontCount > minStops}
               style={{
                 padding: "12px 24px",
                 borderRadius: 8,
                 fontWeight: 700,
                 fontSize: 18,
                 border: "none",
-                cursor: (selfReady || isSaving) ? "not-allowed" : "pointer",
+                cursor: (selfReady || isSaving || veryWantCount < Math.ceil(minStops / 2) || veryWantCount > minStops || veryDontCount > minStops) ? "not-allowed" : "pointer",
                 transition: "background-color .2s",
-                backgroundColor: (selfReady ? "#9CA3AF" : "#2563EB"),
+                backgroundColor: (selfReady || veryWantCount < Math.ceil(minStops / 2) || veryWantCount > minStops || veryDontCount > minStops ? "#9CA3AF" : "#2563EB"),
                 color: "#fff",
               }}
             >
