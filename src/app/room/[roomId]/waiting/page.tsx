@@ -639,7 +639,19 @@ export default function WaitingPage() {
         return;
       }
 
-      // 2) 通常カテゴリから特に〜へ移動 → 理由モーダルを開く
+      // 2) 特に〜から異なる特に〜へ移動（例：veryWant → veryDont）の場合
+      // または 特に〜から特に〜への移動（理由なし）の場合も上限チェック
+      if (targetIsSpecial && fromIsSpecial && target !== picked.from) {
+        // 移動先の現在の枚数を確認
+        const currentCount = target === "veryWant" ? categories.veryWant.length : categories.veryDont.length;
+        if (currentCount >= minStops) {
+          alert(`${target === "veryWant" ? "特に行きたい" : "特に行きたくない"}カードは最大${minStops}枚までです`);
+          setPicked({ card: null, from: null });
+          return;
+        }
+      }
+
+      // 3) 通常カテゴリから特に〜へ移動 → 理由モーダルを開く
       if (targetIsSpecial && !fromIsSpecial) {
         // 上限チェック：特に行きたい・特に行きたくないはminStops枚まで
         const currentCount = target === "veryWant" ? categories.veryWant.length : categories.veryDont.length;
@@ -669,7 +681,7 @@ export default function WaitingPage() {
         return;
       }
 
-      // 3) 通常カテゴリへの通常移動（特に〜から理由なしで移動、または通常同士の移動）
+      // 4) 通常カテゴリへの通常移動（特に〜から理由なしで移動、または通常同士の移動）
       const base = removeFromCategory(card.id, picked.from, categories);
       // 理由は通常カテゴリでは不要なので必ず除去
       // allCardsから元の情報を取得して、理由なしの新しいオブジェクトを作成
@@ -824,6 +836,21 @@ export default function WaitingPage() {
   const confirmDropWithoutReason = useCallback(() => {
     const { card, originalCategory, targetCategory } = confirmDialog;
     if (!card || !originalCategory || !targetCategory) return;
+
+    // 移動先が特に〜の場合、上限チェック
+    const targetIsSpecial = targetCategory === "veryWant" || targetCategory === "veryDont";
+    if (targetIsSpecial) {
+      const currentCount = targetCategory === "veryWant" ? categories.veryWant.length : categories.veryDont.length;
+      // 既に同じカテゴリに存在する場合を除く（removeFromCategoryで既に削除されるため、ここではcurrentCountはそのまま使用）
+      // ただし、元々そのカテゴリにあったなら-1してから比較
+      const adjustedCount = originalCategory === targetCategory ? currentCount - 1 : currentCount;
+      if (adjustedCount >= minStops) {
+        alert(`${targetCategory === "veryWant" ? "特に行きたい" : "特に行きたくない"}カードは最大${minStops}枚までです`);
+        setConfirmDialog({ isOpen: false, card: null, originalCategory: null, targetCategory: null });
+        setPicked({ card: null, from: null });
+        return;
+      }
+    }
 
     // カードの完全な情報を保持して理由なしで target へ移動
     const fullCardInfo = allCards.find(c => c.id === card.id);
