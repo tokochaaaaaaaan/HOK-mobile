@@ -117,7 +117,8 @@
   background: white;
   cursor: pointer;
   transition: all 0.2s;
-  height: 60px;
+  height: auto;
+  min-height: 68px;
 }
 
 .iconButton:hover {
@@ -133,6 +134,14 @@
 .iconEmoji {
   font-size: 32px;
   line-height: 1;
+}
+
+.iconLabel {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.1;
+  color: #374151;
+  text-align: center;
 }
 
 /* テキストエリア */

@@ -106,12 +106,12 @@ const CAT_COLORS: Record<
 const reasonIcons = [
   { key: "gourmet", src: "/emoji/gourmet.svg", emoji: "🍽️", text: "食", fullText: "食事" },
   { key: "thrill", src: "/emoji/thrill.svg", emoji: "🎢", text: "激", fullText: "スリル" },
-  { key: "experience", src: "/emoji/experience.svg", emoji: "🎯", text: "体", fullText: "体験" },
+  { key: "experience", src: "/emoji/experience.svg", emoji: "🏃", text: "体", fullText: "体験" },
   { key: "shopping", src: "/emoji/shopping.svg", emoji: "🛍️", text: "買", fullText: "買い物" },
   { key: "design", src: "/emoji/design.svg", emoji: "🏛️", text: "建築", fullText: "建築・デザイン" },
   { key: "scenery", src: "/emoji/scenery.svg", emoji: "🌅", text: "景", fullText: "景色" },
   { key: "time", src: "/emoji/time.svg", emoji: "⏰", text: "時", fullText: "時間" },
-  { key: "cost", src: "/emoji/cost.svg", emoji: "💰", text: "¥", fullText: "コスパ" },
+  { key: "cost", src: "/emoji/cost.svg", emoji: "💰", text: "¥", fullText: "コスト" },
   { key: "friends", src: "/emoji/friends.svg", emoji: "👥", text: "友", fullText: "友達と一緒に" },
   { key: "family", src: "/emoji/family.svg", emoji: "👨‍👩‍👧‍👦", text: "家", fullText: "家族向け" },
   { key: "relax", src: "/emoji/relax.svg", emoji: "🧘", text: "休", fullText: "リラックス" },
@@ -1640,6 +1640,7 @@ export default function WaitingPage() {
                       title={icon.fullText}
                     >
                       <div className={styles.iconEmoji}>{icon.emoji}</div>
+                      <div className={styles.iconLabel}>{icon.fullText}</div>
                     </div>
                   ))}
                 </div>
