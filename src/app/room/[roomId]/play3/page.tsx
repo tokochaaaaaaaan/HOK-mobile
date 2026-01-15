@@ -25,6 +25,7 @@ import {
 } from "../../../../utils/agreement-calculator";
 import { normalizeCategories } from "../../../../utils/normalizeCategories";
 import MapButton from "@/components/MapButton";
+import NoteWindow from "../components/NoteWindow";
 import styles from "./page.module.css";
 
 const PLAY3_VOTE_SESSIONS = "play3VoteSessions";
@@ -224,6 +225,8 @@ export default function Play3Page() {
   const [minStops, setMinStops] = useState<number>(6);
   // 終了確認モーダル
   const [showEndConfirm, setShowEndConfirm] = useState<boolean>(false);
+  // 実験用：基準時刻（全員play3到達時点）
+  const [baseTimestamp, setBaseTimestamp] = useState<number | null>(null);
   // 強制終了（3秒長押し）確認モーダル
   const [showForceEndConfirm, setShowForceEndConfirm] = useState<boolean>(false);
   const forceEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -710,9 +713,34 @@ export default function Play3Page() {
 
     if (actualParticipantCount > 0 && readyCount === actualParticipantCount && vsIds.length === 0) {
       console.log("[Play3] ✅ Navigating to result page");
+      
+      // 実験用：result遷移時刻を記録
+      if (baseTimestamp && roomId) {
+        const now = Date.now();
+        const elapsed = now - baseTimestamp;
+        const hours = Math.floor(elapsed / 3600000);
+        const minutes = Math.floor((elapsed % 3600000) / 60000);
+        const seconds = Math.floor((elapsed % 60000) / 1000);
+        const ms = elapsed % 1000;
+        
+        setDoc(
+          doc(db, "rooms", roomId as string, "play3Timing", "result_transition"),
+          {
+            event: "result_transition",
+            timestamp: now,
+            baseTimestamp,
+            elapsedMs: elapsed,
+            elapsedFormatted: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(ms).padStart(3, '0')}`,
+            userId: myUserId,
+            userName: normalizedUserName || userName,
+          },
+          { merge: true }
+        ).catch(e => console.error("result遷移時刻記録エラー:", e));
+      }
+      
       router.push(`/room/${roomId}/result`);
     }
-  }, [play3Ready, displayParticipants, vsIds.length, router, roomId]);
+  }, [play3Ready, displayParticipants, vsIds.length, router, roomId, baseTimestamp, myUserId, normalizedUserName, userName]);
 
 
   // finalSelections 購読（waitingページで確定したデータのみ使用）
@@ -906,6 +934,24 @@ export default function Play3Page() {
     
     // どちらかのデータがあれば実行（全員分揃うのを待たない）
     if (!hasWaitingResults && !hasSelections) return;
+    
+    // 実験用：全員がplay3に到達したと判定 → 基準時刻を記録（初回のみ）
+    if (baseTimestamp === null && displayParticipants.length > 0) {
+      const now = Date.now();
+      setBaseTimestamp(now);
+      
+      setDoc(
+        doc(db, "rooms", roomId, "play3Timing", "base"),
+        {
+          event: "all_arrived",
+          timestamp: now,
+          elapsedFormatted: "00:00:00:00",
+          participantCount: displayParticipants.length,
+          participants: displayParticipants.map(p => ({ id: p.id, name: p.name })),
+        },
+        { merge: true }
+      ).catch(e => console.error("基準時刻記録エラー:", e));
+    }
 
     const byCard = (id: string) => {
       const results: Array<{
@@ -1570,6 +1616,39 @@ export default function Play3Page() {
           
           console.log('投票完了 - 結果保存完了:', { cardId, status: finalStatus, message: resultMessage });
           
+          // 実験用：投票終了時刻を記録（全員投票完了時点）
+          if (baseTimestamp) {
+            const now = Date.now();
+            const elapsed = now - baseTimestamp;
+            const hours = Math.floor(elapsed / 3600000);
+            const minutes = Math.floor((elapsed % 3600000) / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            const ms = elapsed % 1000;
+            
+            await setDoc(
+              doc(db, "rooms", roomId, "play3Timing", `vote_end_${sessionId}`),
+              {
+                event: "vote_end",
+                sessionId: sessionId,
+                cardId: cardId,
+                cardName: cardName,
+                round: activeVote?.round || 1,
+                timestamp: now,
+                baseTimestamp,
+                elapsedMs: elapsed,
+                elapsedFormatted: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(ms).padStart(3, '0')}`,
+                result: {
+                  status: finalStatus,
+                  goVotes,
+                  noVotes,
+                  pendingVotes,
+                },
+                participantCount: expectedIds.length,
+              },
+              { merge: true }
+            ).catch(e => console.error("投票終了時刻記録エラー:", e));
+          }
+          
           // 0.7秒待ってからUI解除とモーダルを閉じる
           await new Promise(resolve => setTimeout(resolve, 700));
           
@@ -1736,6 +1815,9 @@ export default function Play3Page() {
           createdAt: now,
           updatedAt: serverTimestamp(),
         });
+        
+        // 実験用：投票開始時刻を記録（基準時刻からの経過時間）
+        // トランザクション外で非同期記録するため、後で実行する必要がある（トランザクション内では記録できない）
 
         // play3State更新（phase: voting）
         transaction.set(
@@ -1777,6 +1859,40 @@ export default function Play3Page() {
       setUiLockReason("vote");
       
       console.log("startVote完了:", result);
+      
+      // 実験用：投票開始時刻を記録（新規セッション作成時のみ）
+      if (result.action === "started" && baseTimestamp) {
+        const now = Date.now();
+        const elapsed = now - baseTimestamp;
+        const hours = Math.floor(elapsed / 3600000);
+        const minutes = Math.floor((elapsed % 3600000) / 60000);
+        const seconds = Math.floor((elapsed % 60000) / 1000);
+        const ms = elapsed % 1000;
+        const cardInfo = getCard(cid);
+        
+        // round番号はセッションIDから取得（sessionIdに含まれている）
+        const roundMatch = result.sessionId.match(/-r(\d+)-/);
+        const round = roundMatch ? parseInt(roundMatch[1], 10) : 1;
+        
+        setDoc(
+          doc(db, "rooms", roomId, "play3Timing", `vote_start_${result.sessionId}`),
+          {
+            event: "vote_start",
+            sessionId: result.sessionId,
+            cardId: cid,
+            cardName: cardInfo?.title || cid,
+            round: round,
+            timestamp: now,
+            baseTimestamp,
+            elapsedMs: elapsed,
+            elapsedFormatted: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(ms).padStart(3, '0')}`,
+            startedBy: effectiveUserId,
+            startedByName: normalizedUserName || userName,
+            participantCount: participantIds.length,
+          },
+          { merge: true }
+        ).catch(e => console.error("投票開始時刻記録エラー:", e));
+      }
       
       // 新規セッション作成時のみ、初回投票を実行
       if (result.action === "started") {
@@ -2133,9 +2249,6 @@ export default function Play3Page() {
                       <div className={styles.cardTitle}>
                         {info?.title}
                       </div>
-                      <div className={styles.cardAgreement}>
-                        {ag.toFixed(0)}%
-                      </div>
                     </div>
                   </div>
                 );
@@ -2211,9 +2324,6 @@ export default function Play3Page() {
                     <div className={styles.cardInfo}>
                       <div className={styles.cardTitle}>
                         {info?.title}
-                      </div>
-                      <div className={styles.cardAgreement}>
-                        {ag.toFixed(0)}%
                       </div>
                     </div>
                   </div>
@@ -2373,18 +2483,6 @@ export default function Play3Page() {
                       >
                         <div style={{ fontWeight: 800, color: '#111827', fontSize: 14 }}>
                           {info?.title}
-                        </div>
-                        <div style={{ 
-                          fontWeight: 900, 
-                          color: '#fff', 
-                          fontSize: 14,
-                          background: 'linear-gradient(135deg, #0ea5e9, #3b82f6)',
-                          padding: '4px 10px',
-                          borderRadius: 20,
-                          minWidth: 50,
-                          textAlign: 'center',
-                        }}>
-                          {ag.toFixed(0)}%
                         </div>
                       </div>
                     </div>
@@ -3306,74 +3404,7 @@ export default function Play3Page() {
                       return acc + (mine === "pending" ? 1 : 0);
                     }, 0);
 
-                    return (
-                      <div style={{
-                        borderTop: "1px solid #e5e7eb",
-                        padding: "16px 20px",
-                        background: "#fff",
-                      }}>
-                        <div style={{
-                          fontSize: 13,
-                          fontWeight: 700,
-                          color: '#374151',
-                          marginBottom: 10,
-                        }}>
-                          投票済み {votedCount}/{totalParticipantsCount}：
-                          {votedUsers.length > 0 ? (
-                            <span style={{ color: '#111827', fontWeight: 800 }}>
-                              {votedUsers.map(u => u.name).join('・')}
-                            </span>
-                          ) : (
-                            <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>
-                              まだ誰も投票していません
-                            </span>
-                          )}
-                        </div>
-                        
-                        {/* 各選択肢の投票状況 */}
-                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                          {noCount > 0 && (
-                            <div style={{
-                              background: '#dbeafe',
-                              border: '1px solid #93c5fd',
-                              borderRadius: 6,
-                              padding: '5px 10px',
-                              fontSize: 12,
-                              fontWeight: 700,
-                              color: '#1e40af',
-                            }}>
-                              行かない: {noCount}
-                            </div>
-                          )}
-                          {pendingCount > 0 && (
-                            <div style={{
-                              background: '#fef3c7',
-                              border: '1px solid #fde047',
-                              borderRadius: 6,
-                              padding: '5px 10px',
-                              fontSize: 12,
-                              fontWeight: 700,
-                              color: '#854d0e',
-                            }}>
-                              保留: {pendingCount}
-                            </div>
-                          )}
-                          {goCount > 0 && (
-                            <div style={{
-                              background: '#fce7f3',
-                              border: '1px solid #f9a8d4',
-                              borderRadius: 6,
-                              padding: '5px 10px',
-                              fontSize: 12,
-                              fontWeight: 700,
-                              color: '#db2777',
-                            }}>
-                              行く: {goCount}
-                            </div>
-                          )}  
-                        </div>
-                      </div>
-                    );
+                    return null;
                   })()}
                 </div>
               </div>
@@ -3769,20 +3800,6 @@ export default function Play3Page() {
                             <div style={{ fontWeight: 800, color: '#111827', fontSize: 14 }}>
                               {info?.title}
                             </div>
-                            <div
-                              style={{
-                                fontWeight: 900,
-                                color: '#fff',
-                                fontSize: 14,
-                                background: 'linear-gradient(135deg, #0ea5e9, #3b82f6)',
-                                padding: '4px 10px',
-                                borderRadius: 20,
-                                minWidth: 50,
-                                textAlign: 'center',
-                              }}
-                            >
-                              {ag.toFixed(0)}%
-                            </div>
                           </div>
                         </div>
                       );
@@ -3920,6 +3937,9 @@ export default function Play3Page() {
       })()}
 
       <MapButton />
+
+      {/* ノートウィンドウ */}
+      <NoteWindow currentPage="play3" />
     </div>
   );
 }

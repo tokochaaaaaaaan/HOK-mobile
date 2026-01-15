@@ -17,6 +17,7 @@ import {
 import { db } from "../../../../../lib/firebase";
 import { normalizeCategories } from "../../../../utils/normalizeCategories";
 import MapButton from "@/components/MapButton";
+import NoteWindow from "../components/NoteWindow";
 import { cards } from "@/data/cards";
 import styles from "./page.module.css";
 
@@ -1614,6 +1615,9 @@ export default function Play2Page() {
       )}
 
       <MapButton />
+
+      {/* ノートウィンドウ */}
+      <NoteWindow currentPage="play2" />
     </>
   );
 }

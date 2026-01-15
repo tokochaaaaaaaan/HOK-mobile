@@ -7,6 +7,7 @@ import { agreementOverall, convertSelectionsToMatrix } from '../../../../utils/a
 import { db } from '../../../../../lib/firebase';
 import { normalizeCategories } from '../../../../utils/normalizeCategories';
 import MapButton from '@/components/MapButton';
+import NoteWindow from '../components/NoteWindow';
 import { useUser } from '@/context/UserContext';
 
 // 理由アイコンの定義
@@ -972,6 +973,9 @@ export default function ResultPage() {
       })()}
 
       <MapButton />
+
+      {/* ノートウィンドウ */}
+      <NoteWindow currentPage="result" />
     </div>
   );
 }

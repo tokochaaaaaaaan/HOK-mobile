@@ -17,6 +17,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
 import MapButton from "@/components/MapButton";
+import NoteWindow from "../components/NoteWindow";
 import styles from "./page.module.css";
 
 // ============================================================
@@ -2263,6 +2264,9 @@ export default function WaitingPage() {
 
       {/* マップボタン */}
       <MapButton />
+
+      {/* ノートウィンドウ */}
+      <NoteWindow currentPage="waiting" />
     </>
   );
 }
