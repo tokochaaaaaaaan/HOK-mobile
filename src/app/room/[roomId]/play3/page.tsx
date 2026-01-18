@@ -2185,9 +2185,6 @@ export default function Play3Page() {
                       <div className={styles.cardTitle}>
                         {info?.title}
                       </div>
-                      <div className={styles.cardAgreement}>
-                        {ag.toFixed(0)}
-                      </div>
                     </div>
                   </div>
                 );
