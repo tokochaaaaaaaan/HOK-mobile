@@ -1,7 +1,7 @@
 // src/app/room/[roomId]/page.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useUser } from "@/context/UserContext";
 import { usePreventBack } from "@/hooks/usePreventBack";
@@ -20,6 +20,7 @@ export default function RoomPage() {
   const [roomData, setRoomData] = useState<any>(null);
   const [minStops, setMinStops] = useState<number>(6);
   const [startPhase, setStartPhase] = useState<"solo" | "discussion">("solo");
+  const hasNavigatedRef = useRef(false);
 
   // ルーム情報のリアルタイム購読（ここで gameStarted も監視します）
   useEffect(() => {
@@ -35,18 +36,24 @@ export default function RoomPage() {
       const data = snap.data();
       console.log('Room data:', data);
       setRoomData(data);
-      // gameStarted フラグが立ったら開始フェーズに応じて遷移
-      if (data.gameStarted) {
-        const phase = data.startPhase;
-        if (phase === "discussion") {
-          router.push(`/room/${roomId}/discussion`);
-        } else {
-          router.push(`/room/${roomId}/second`);
-        }
-      }
     });
     return () => unsub();
   }, [roomId, router]);
+
+  // gameStarted を検知したら（ホスト/ゲスト問わず）開始フェーズに応じて遷移
+  useEffect(() => {
+    if (!roomId || typeof roomId !== "string") return;
+    if (!roomData?.gameStarted) return;
+    if (hasNavigatedRef.current) return;
+
+    const phase = roomData?.startPhase;
+    hasNavigatedRef.current = true;
+    if (phase === "discussion") {
+      router.push(`/room/${roomId}/discussion`);
+    } else {
+      router.push(`/room/${roomId}/second`);
+    }
+  }, [roomData, roomId, router]);
 
   // 初回ロード時に自動参加
   useEffect(() => {
