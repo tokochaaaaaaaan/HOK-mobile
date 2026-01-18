@@ -9,12 +9,18 @@ if (!SECRET_KEY) {
 /**
  * データに秘密鍵を自動的に付与するヘルパー関数
  * Firestore への書き込み時に使用
+ * 注: SECRET_KEY が undefined の場合は _authKey フィールドを含めない
+ *     （Firestore は undefined 値を許さないため）
  */
-export const addAuthKey = <T extends Record<string, any>>(data: T): T & { _authKey: string | undefined } => {
-  return {
-    ...data,
-    _authKey: SECRET_KEY,
-  };
+export const addAuthKey = <T extends Record<string, any>>(data: T): T | (T & { _authKey: string }) => {
+  if (SECRET_KEY) {
+    return {
+      ...data,
+      _authKey: SECRET_KEY,
+    };
+  }
+  // SECRET_KEY がない場合は元のデータのみ返す
+  return data;
 };
 
 /**
