@@ -10,7 +10,7 @@ import styles from "./NoteWindow.module.css";
 type NoteMode = "solo" | "multi";
 
 interface NoteWindowProps {
-  currentPage: "play" | "play2" | "waiting" | "play3" | "result";
+  currentPage: "play" | "play2" | "waiting" | "play3" | "result" | "discussion";
 }
 
 export default function NoteWindow({ currentPage }: NoteWindowProps) {
@@ -28,6 +28,14 @@ export default function NoteWindow({ currentPage }: NoteWindowProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [overlayMouseDown, setOverlayMouseDown] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
+  
+  // HTMLが実質的に空かどうか判定
+  const isHtmlEmpty = (html: string) => {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html || "";
+    const text = (tmp.textContent || "").trim();
+    return text.length === 0;
+  };
 
   // play3フェーズかどうかを判定（multiモードの有効性）
   const isPlay3 = currentPage === "play3";
@@ -89,8 +97,8 @@ export default function NoteWindow({ currentPage }: NoteWindowProps) {
     setIsSaving(true);
 
     try {
-      // Soloノートをセーブ
-      if (roomId && userName) {
+      // Soloノートをセーブ（内容が空の場合は保存しない）
+      if (roomId && userName && !isHtmlEmpty(soloHtml)) {
         const soloRef = doc(db, "solo_log", roomId, userName, "note");
         await setDoc(
           soloRef,
@@ -103,8 +111,8 @@ export default function NoteWindow({ currentPage }: NoteWindowProps) {
         );
       }
 
-      // Multiノートをセーブ（play3でのみ）
-      if (isPlay3 && roomId) {
+      // Multiノートをセーブ（play3でのみ。内容が空の場合は保存しない）
+      if (isPlay3 && roomId && !isHtmlEmpty(multiHtml)) {
         const multiRef = doc(db, "multi_log", roomId, "note");
         await setDoc(
           multiRef,
@@ -149,6 +157,16 @@ export default function NoteWindow({ currentPage }: NoteWindowProps) {
         document.execCommand("indent", false);
       }
       editorRef.current?.focus();
+    }
+
+    // 全体用（multi）では Ctrl/Cmd+Z（Undo）と Shift+Ctrl/Cmd+Z（Redo）を無効化
+    if (mode === "multi") {
+      const isUndo = (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z";
+      const isRedo = (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "z";
+      if (isUndo || isRedo) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
     }
   };
 

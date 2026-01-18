@@ -35,9 +35,14 @@ export default function RoomPage() {
       const data = snap.data();
       console.log('Room data:', data);
       setRoomData(data);
-      // gameStarted フラグが立ったら second ページへ
+      // gameStarted フラグが立ったら開始フェーズに応じて遷移
       if (data.gameStarted) {
-        router.push(`/room/${roomId}/second`);
+        const phase = data.startPhase;
+        if (phase === "discussion") {
+          router.push(`/room/${roomId}/discussion`);
+        } else {
+          router.push(`/room/${roomId}/second`);
+        }
       }
     });
     return () => unsub();
@@ -106,10 +111,6 @@ export default function RoomPage() {
       alert("参加者がまだ揃っていません");
       return;
     }
-    if (startPhase === "discussion") {
-      alert("まだ選べません");
-      return;
-    }
     // Firestore にフラグを書き込む
     if (!roomId || typeof roomId !== 'string') return;
     const roomRef = doc(db, "rooms", roomId);
@@ -118,8 +119,12 @@ export default function RoomPage() {
       startPhase,
       gameStarted: true,
     }));
-    // ホスト自身は即座に second に飛ばす
-    router.push(`/room/${roomId}/second`);
+    // ホスト自身は即座に選択フェーズへ飛ばす
+    if (startPhase === "discussion") {
+      router.push(`/room/${roomId}/discussion`);
+    } else {
+      router.push(`/room/${roomId}/second`);
+    }
   };
 
   if (!roomData) return null;
