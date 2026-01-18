@@ -2186,7 +2186,7 @@ export default function Play3Page() {
                         {info?.title}
                       </div>
                       <div className={styles.cardAgreement}>
-                        {ag.toFixed(0)}%
+                        {ag.toFixed(0)}
                       </div>
                     </div>
                   </div>

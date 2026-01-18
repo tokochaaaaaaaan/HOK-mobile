@@ -130,6 +130,19 @@ export default function ResultPage() {
   const [categoryDetailModal, setCategoryDetailModal] = useState<{ userId: string; category: string } | null>(null);
   const [expandedCard, setExpandedCard] = useState<{ id: string; flipped: boolean } | null>(null);
 
+  // モーダル開閉時にbodyのスクロールを制御
+  useEffect(() => {
+    const isModalOpen = activeUserInfo || allCardsModalOpen || categoryDetailModal || cardModal || expandedCard;
+    if (isModalOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [activeUserInfo, allCardsModalOpen, categoryDetailModal, cardModal, expandedCard]);
+
   // 初期: go/no/neutralだけ展開
   useEffect(() => {
     setExpanded({ go: true, no: true, neutral: true, vs: true });
