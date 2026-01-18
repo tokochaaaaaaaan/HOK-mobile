@@ -68,18 +68,18 @@ const CAT_COLORS: Record<
   { base: string; active: string; bg: string; bgActive: string; label: string }
 > = {
   veryWant: {
-    base: "#ef4444", // red-500
-    active: "#dc2626", // red-600
+    base: "#ef4444", // 赤
+    active: "#dc2626", // 濃い赤
     bg: "rgba(239,68,68,.05)",
     bgActive: "rgba(239,68,68,.12)",
-    label: "#b91c1c", // red-700
+    label: "#b91c1c", // さらに濃い赤
   },
   want: {
-    base: "#ec4899", // pink-500
-    active: "#db2777", // pink-600
-    bg: "rgba(236,72,153,.05)",
-    bgActive: "rgba(236,72,153,.12)",
-    label: "#be185d", // pink-700
+    base: "#e91e63", // 青に近い赤（マゼンタ・ピンク）
+    active: "#c2185b", // 濃いマゼンタ
+    bg: "rgba(233,30,99,.05)",
+    bgActive: "rgba(233,30,99,.12)",
+    label: "#ad1457", // さらに濃いマゼンタ
   },
   neutral: {
     base: "#9ca3af", // gray-400/500 mix

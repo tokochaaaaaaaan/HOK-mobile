@@ -1093,8 +1093,9 @@ export default function Play2Page() {
             onClick={() => setFilter("want")}
             className={`${styles.filterButton} ${filter === "want" ? styles.active : ""}`}
             style={{
-              backgroundColor: filter === "want" ? "#e91e63" : undefined,
-              borderColor: filter === "want" ? "#e91e63" : undefined,
+              backgroundColor: "#e91e63",
+              borderColor: filter === "want" ? "#000000" : "#e91e63",
+              color: "#ffffff",
             }}
           >
             行きたい
@@ -1103,8 +1104,9 @@ export default function Play2Page() {
             onClick={() => setFilter("dont")}
             className={`${styles.filterButton} ${filter === "dont" ? styles.active : ""}`}
             style={{
-              backgroundColor: filter === "dont" ? "#03a9f4" : undefined,
-              borderColor: filter === "dont" ? "#03a9f4" : undefined,
+              backgroundColor: "#03a9f4",
+              borderColor: filter === "dont" ? "#000000" : "#03a9f4",
+              color: "#ffffff",
             }}
           >
             行きたくない
