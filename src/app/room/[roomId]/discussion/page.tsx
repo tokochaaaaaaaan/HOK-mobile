@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useUser } from "@/context/UserContext";
 import { usePreventBack } from "@/hooks/usePreventBack";
@@ -254,6 +254,7 @@ export default function DiscussionPage() {
   const currentCard = useMemo(() => cards[selectedIndex] ?? null, [cards, selectedIndex]);
   const [showAll, setShowAll] = useState(false);
   const [cardPreview, setCardPreview] = useState<typeof allCards[number] | null>(null);
+  const scrollWrapperRef = useRef<HTMLDivElement>(null);
 
   // 画面の高さに合わせて全UIを縮小して収める（playと同様）
   const [scale, setScale] = useState(1);
@@ -355,7 +356,17 @@ export default function DiscussionPage() {
 
       {/* 横スクロール可能なカード一覧 */}
       <div className={styles.cardScrollContainer}>
-        <div className={styles.cardScrollWrapper}>
+        <div
+          className={styles.cardScrollWrapper}
+          ref={scrollWrapperRef}
+          onScroll={(e) => {
+            // 「すべて見る」表示中は、スクロール位置をジョーズ（先頭）に固定
+            if (showAll && scrollWrapperRef.current) {
+              scrollWrapperRef.current.scrollLeft = 0;
+            }
+          }}
+          style={{ overflowX: showAll ? "hidden" : "auto" }}
+        >
           {cards.map((card, index) => (
             <div
               key={card.id}
@@ -373,12 +384,30 @@ export default function DiscussionPage() {
 
       {/* 「すべて見る」モーダル */}
       <div className={styles.viewAllWrapper}>
-        <button className={styles.viewAllBtn} onClick={() => setShowAll(true)}>
+        <button
+          className={styles.viewAllBtn}
+          onClick={() => {
+            setShowAll(true);
+            // オープン時にスクロール位置を先頭（ジョーズ）へ固定
+            if (scrollWrapperRef.current) {
+              scrollWrapperRef.current.scrollLeft = 0;
+            }
+          }}
+        >
           すべて見る
         </button>
       </div>
       {showAll && (
-        <div className={styles.modalOverlay} onClick={() => setShowAll(false)}>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowAll(false);
+            // クローズ時もスクロール位置を維持（先頭固定）
+            if (scrollWrapperRef.current) {
+              scrollWrapperRef.current.scrollLeft = 0;
+            }
+          }}
+        >
           <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
             {cards.map((c, i) => (
               <div
@@ -387,6 +416,10 @@ export default function DiscussionPage() {
                 onClick={() => {
                   setSelectedIndex(i);
                   setShowAll(false);
+                  // 選択後も先頭（ジョーズ）位置で固定
+                  if (scrollWrapperRef.current) {
+                    scrollWrapperRef.current.scrollLeft = 0;
+                  }
                 }}
               >
                 <img src={c.frontSrc} alt={c.title} />
