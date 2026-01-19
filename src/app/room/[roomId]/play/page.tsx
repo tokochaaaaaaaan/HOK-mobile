@@ -246,7 +246,7 @@ export default function PlayPage() {
   };
 
   // 初期カードプール（39枚）
-  const initialCards: PlayPageCard[] = Array.from({ length: 39 }, (_, i) => {
+  const initialCards: PlayPageCard[] = Array.from({ length: 10 }, (_, i) => {
     const idx = i + 1;
     return {
       id: `card${idx}`,
@@ -549,10 +549,10 @@ export default function PlayPage() {
           zIndex: 100,
           boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
           lineHeight: '1.5',
-          maxWidth: '200px',
+          minWidth: '280px',
         }}
       >
-        <div style={{ marginBottom: '4px', fontSize: '0.85rem', color: '#78350f' }}>📋 条件</div>
+        <div style={{ marginBottom: '4px', fontSize: '0.85rem', color: '#78350f' }}>📋 条件 <span style={{ fontWeight: 'bold', color: '#d97706' }}>（1人フェーズ 1/4）</span></div>
         <div
           style={{
             display: 'flex',
@@ -842,11 +842,30 @@ export default function PlayPage() {
         </div>
       </div>
 
-      {/* 「すべて見る」モーダル */}
-      <div className={styles.viewAllWrapper}>
+      {/* 「すべて見る」ボタン */}
+      <div style={{ textAlign: 'center', margin: '20px 0' }}>
         <button
-          className={styles.viewAllBtn}
           onClick={() => setShowAll(true)}
+          style={{
+            padding: '12px 32px',
+            backgroundColor: '#3b82f6',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: '1rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.boxShadow = '0 6px 16px rgba(59, 130, 246, 0.4)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.3)';
+          }}
         >
           すべて見る
         </button>

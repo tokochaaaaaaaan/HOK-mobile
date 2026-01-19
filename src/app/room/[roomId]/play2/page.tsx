@@ -426,6 +426,54 @@ export default function Play2Page() {
 
   return (
     <>
+      {/* 条件表示（左上） */}
+      <div
+        style={{
+          position: 'fixed',
+          top: '12px',
+          left: '12px',
+          padding: '10px 14px',
+          backgroundColor: '#fef3c7',
+          color: '#92400e',
+          border: '2px solid #f59e0b',
+          borderRadius: '8px',
+          fontSize: '0.8rem',
+          fontWeight: 'bold',
+          zIndex: 100,
+          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+          lineHeight: '1.5',
+          minWidth: '300px',
+        }}
+      >
+        <div style={{ marginBottom: '4px', fontSize: '0.85rem', color: '#78350f' }}>📋 条件 <span style={{ fontWeight: 'bold', color: '#d97706' }}>（1人フェーズ 2/4）</span></div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            color: (wantSelected.size >= Math.ceil(minStops / 2)) ? '#065f46' : '#92400e'
+          }}
+        >
+          <span>{(wantSelected.size >= Math.ceil(minStops / 2)) ? '✅' : '⏳'}</span>
+          <span>・特に行きたい{Math.ceil(minStops / 2)}枚以上</span>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            color: ((wantSelected.size <= minStops) && (dontSelected.size <= minStops)) ? '#065f46' : '#dc2626'
+          }}
+        >
+          <span>{((wantSelected.size <= minStops) && (dontSelected.size <= minStops)) ? '✅' : '⚠️'}</span>
+          <span>・各{minStops}枚まで</span>
+        </div>
+        <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #fbbf24', fontSize: '0.75rem' }}>
+          現在:
+          <span style={{ marginLeft: 4, color: (wantSelected.size >= Math.ceil(minStops / 2)) ? '#065f46' : '#dc2626' }}>行きたい {wantSelected.size}枚</span>
+          <span style={{ marginLeft: 8, color: (dontSelected.size <= minStops) ? '#065f46' : '#dc2626' }}>/ 行きたくない {dontSelected.size}枚</span>
+        </div>
+      </div>
       {/* Whiteboard Overlay */}
       {showOverlay && (
         <div
@@ -1031,55 +1079,6 @@ export default function Play2Page() {
         </div>
       )}
 
-      {/* 条件表示（左上） */}
-      <div
-        style={{
-          position: 'fixed',
-          top: '12px',
-          left: '12px',
-          padding: '10px 14px',
-          backgroundColor: '#fef3c7',
-          color: '#92400e',
-          border: '2px solid #f59e0b',
-          borderRadius: '8px',
-          fontSize: '0.8rem',
-          fontWeight: 'bold',
-          zIndex: 100,
-          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
-          lineHeight: '1.5',
-          maxWidth: '200px',
-        }}
-      >
-        <div style={{ marginBottom: '4px', fontSize: '0.85rem', color: '#78350f' }}>📋 条件</div>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            color: (wantSelected.size >= Math.ceil(minStops / 2)) ? '#065f46' : '#92400e'
-          }}
-        >
-          <span>{(wantSelected.size >= Math.ceil(minStops / 2)) ? '✅' : '⏳'}</span>
-          <span>・特に行きたい{Math.ceil(minStops / 2)}枚以上</span>
-        </div>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            color: ((wantSelected.size <= minStops) && (dontSelected.size <= minStops)) ? '#065f46' : '#dc2626'
-          }}
-        >
-          <span>{((wantSelected.size <= minStops) && (dontSelected.size <= minStops)) ? '✅' : '⚠️'}</span>
-          <span>・各{minStops}枚まで</span>
-        </div>
-        <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #fbbf24', fontSize: '0.75rem' }}>
-          現在:
-          <span style={{ marginLeft: 4, color: (wantSelected.size >= Math.ceil(minStops / 2)) ? '#065f46' : '#dc2626' }}>{wantSelected.size}枚</span>
-          <span style={{ marginLeft: 8, color: (dontSelected.size <= minStops) ? '#065f46' : '#dc2626' }}>/ {dontSelected.size}枚</span>
-        </div>
-      </div>
-
       {/* Main Play2Page UI */}
       <div className={styles.container}>
         <h1 className={styles.title}>
@@ -1142,7 +1141,31 @@ export default function Play2Page() {
             {/* 全て見るボタン */}
             <button
               onClick={() => setShowAllModal(true)}
-              className={styles.viewAllButton}
+              style={{
+                position: 'absolute',
+                bottom: '12px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                padding: '10px 24px',
+                backgroundColor: '#3b82f6',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: '0 3px 10px rgba(59, 130, 246, 0.3)',
+                transition: 'all 0.2s ease',
+                zIndex: 10,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateX(-50%) translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 5px 14px rgba(59, 130, 246, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateX(-50%)';
+                e.currentTarget.style.boxShadow = '0 3px 10px rgba(59, 130, 246, 0.3)';
+              }}
             >
               すべて見る
             </button>

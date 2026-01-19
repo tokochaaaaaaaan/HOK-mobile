@@ -71,7 +71,7 @@ const cardTitles = [
 ];
 
 // カード定義（play3 と揃える）
-const allCards = Array.from({ length: 39 }, (_, i) => {
+const allCards = Array.from({ length: 10 }, (_, i) => {
   const idx = i + 1;
   return {
     id: `card${idx}`,
@@ -257,7 +257,7 @@ export default function ResultPage() {
 
   // 全カード一覧のため、全カードに対する最終カテゴリを決定
   const allCardsWithFinalCategory = useMemo(() => {
-    const ALL_CARDS = Array.from({ length: 39 }, (_, i) => `card${i + 1}`);
+    const ALL_CARDS = Array.from({ length: 10 }, (_, i) => `card${i + 1}`);
     return ALL_CARDS.map(cardId => {
       let finalCategory = 'unassigned';
       if (goIds.includes(cardId)) finalCategory = 'go';

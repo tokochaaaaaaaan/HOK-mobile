@@ -133,40 +133,11 @@ export default function Play3Page() {
     "ザ・フライング・ダイナソー",
     "名探偵コナン 4-D ライブ・ショー ~星空の宝石(ジュエル)~",
     "クロミ・ライブ",
-    "パークサイド・グリル",
-    "SAIDO",
-    "デリシャス・ミー！ザ・クッキー・キッチン",
-    "スペース・キラー",
-    "ミニオン・ハチャメチャ・アイス",
-    "ミニオン・ハチャメチャ・ライド",
-    "マリオカート ~クッパの挑戦状~",
-    "ヨッシー・アドベンチャー",
-    "キノピオカフェ",
-    "ピットストップ・ポップコーン",
-    "三本の箒",
-    "オリバンダーの店",
-    "ハリー・ポッター・アンド・ザ・フォービドゥン・ジャーニー",
-    "フライト・オブ・ザ・ヒッポグリフ",
-    "ハリウッド・ドリーム・ザ・ライド",
-    "プレイング・ウィズおさるのジョージ",
-    "シング・オン・ツアー",
-    "スタジオ・スターズ・レストラン",
-    "ビバリーヒルズ・ブランジェリー",
-    "ハローキティのコーナーカフェ",
-    "スヌーピー・バックロット・カフェ",
-    "ハローキティのリボン・コレクション",
-    "エルモのゴーゴー・スケートボード",
-    "エルモのバブル・バブル",
-    "エルモのリトル・ドライブ",
-    "ハローキティのカップケーキ・ドリーム",
-    "ビッグバードのビッグトップ・サーカス",
-    "フライング・スヌーピー",
-    "モッピーのバルーン・トリップ",
   ];
 
   const ALL_CARDS = useMemo(
     () =>
-      Array.from({ length: 39 }, (_, i) => {
+      Array.from({ length: 10 }, (_, i) => {
         const idx = i + 1;
         return {
           id: `card${idx}`,
@@ -1159,8 +1130,44 @@ export default function Play3Page() {
 
   // カードモーダル
   const [cardModal, setCardModal] = useState<{ id: string; flipped: boolean } | null>(null);
-  const openCard = (id: string) => setCardModal({ id, flipped: false });
-  const closeCard = () => setCardModal(null);
+  const [isCardModalMinimized, setIsCardModalMinimized] = useState(false);
+  const [votingCardId, setVotingCardId] = useState<string | null>(null); // 投票中のカードIDを保持
+  
+  const openCard = (id: string) => {
+    // 投票中かどうか確認
+    const isVoting = activeVote?.phase === "voting" || activeVote?.phase === "finalizing";
+    
+    if (isVoting && votingCardId) {
+      // 投票中の場合
+      if (id === votingCardId) {
+        // 投票カードをクリック：最小化中なら展開、通常表示なら何もしない
+        if (isCardModalMinimized) {
+          setIsCardModalMinimized(false);
+        }
+        return;
+      } else {
+        // 投票カード以外をクリック：参照用に開く（投票小ウィンドウは維持）
+        setCardModal({ id, flipped: false });
+        setIsCardModalMinimized(false);
+        return;
+      }
+    }
+    
+    // 投票中でない場合：通常通り開く
+    setCardModal({ id, flipped: false });
+    setIsCardModalMinimized(false);
+  };
+  
+  const closeCard = () => {
+    // 投票中の場合は、投票小ウィンドウに戻る
+    if (votingCardId && (activeVote?.phase === "voting" || activeVote?.phase === "finalizing")) {
+      setCardModal({ id: votingCardId, flipped: false });
+      setIsCardModalMinimized(true);
+      return;
+    }
+    setCardModal(null);
+    setIsCardModalMinimized(false);
+  };
   const [uiLocked, setUiLocked] = useState(false);
   
   // 投票結果表示モーダル
@@ -1234,7 +1241,14 @@ export default function Play3Page() {
         setActiveVote(next);
         if ((next.phase === "voting" || next.phase === "finalizing") && next.cardId) {
           const cid = next.cardId;
+          setVotingCardId(cid); // 投票中のカードIDを記録
           setCardModal((m) => (m?.id === cid ? m : { id: cid, flipped: false }));
+          setIsCardModalMinimized(false);
+        } else if (next.phase === "idle" || next.phase === "finished") {
+          // 投票終了時は投票カードIDをクリアし、投票ウィンドウを全て無くす
+          setVotingCardId(null);
+          setCardModal(null);
+          setIsCardModalMinimized(false);
         }
         
         // 投票結果を全員に表示（新しいタイムスタンプのみ）
@@ -1684,7 +1698,32 @@ export default function Play3Page() {
     return !!(myUserId && displayParticipants.some(p => p.id === myUserId));
   }, [myUserId, displayParticipants]);
 
-  const startVote = async (choice: VoteChoice, targetCardId?: string) => {
+  // 投票開始時のログをFirebaseに記録
+  const logVoteStart = async (cardId: string) => {
+    if (!roomId || typeof roomId !== "string" || !myUserId) return;
+    
+    try {
+      const cardInfo = getCard(cardId);
+      const cardName = cardInfo?.title || cardId;
+      
+      const now = Date.now();
+      const logRef = doc(db, "rooms", roomId, "play3VoteLogs", `start_${cardId}_${now}`);
+      
+      await setDoc(logRef, {
+        event: "discussion_started",
+        cardId,
+        cardName,
+        startedBy: myUserId,
+        startedByName: normalizedUserName || userName || "unknown",
+        timestamp: serverTimestamp(),
+        participants: displayParticipants.map(p => ({ id: p.id, name: p.name })),
+      }, { merge: true });
+    } catch (error) {
+      console.error("投票開始ログ記録エラー:", error);
+    }
+  };
+
+  const startVote = async (targetCardId?: string) => {
     const effectiveUserId = myUserId?.trim();
     if (!roomId || typeof roomId !== "string" || !effectiveUserId) return;
     
@@ -1860,53 +1899,10 @@ export default function Play3Page() {
       
       console.log("startVote完了:", result);
       
-      // 実験用：投票開始時刻を記録（新規セッション作成時のみ）
-      if (result.action === "started" && baseTimestamp) {
-        const now = Date.now();
-        const elapsed = now - baseTimestamp;
-        const hours = Math.floor(elapsed / 3600000);
-        const minutes = Math.floor((elapsed % 3600000) / 60000);
-        const seconds = Math.floor((elapsed % 60000) / 1000);
-        const ms = elapsed % 1000;
-        const cardInfo = getCard(cid);
-        
-        // round番号はセッションIDから取得（sessionIdに含まれている）
-        const roundMatch = result.sessionId.match(/-r(\d+)-/);
-        const round = roundMatch ? parseInt(roundMatch[1], 10) : 1;
-        
-        setDoc(
-          doc(db, "rooms", roomId, "play3Timing", `vote_start_${result.sessionId}`),
-          {
-            event: "vote_start",
-            sessionId: result.sessionId,
-            cardId: cid,
-            cardName: cardInfo?.title || cid,
-            round: round,
-            timestamp: now,
-            baseTimestamp,
-            elapsedMs: elapsed,
-            elapsedFormatted: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(ms).padStart(3, '0')}`,
-            startedBy: effectiveUserId,
-            startedByName: normalizedUserName || userName,
-            participantCount: participantIds.length,
-          },
-          { merge: true }
-        ).catch(e => console.error("投票開始時刻記録エラー:", e));
-      }
-      
-      // 新規セッション作成時のみ、初回投票を実行
+      // 投票開始ログをFirebaseに記録
       if (result.action === "started") {
-        // UIに即反映
-        setMyVoteChoice(choice);
-        setVoteMap((prev) => ({
-          ...prev,
-          [effectiveUserId]: choice,
-        }));
-        
-        // ★ここが重要：activeVoteを待たずに "作ったsessionId" に直接書く
-        await castVote(choice, result.sessionId);
+        await logVoteStart(cid);
       }
-      // 既存セッションに参加する場合は、castVoteを直接呼ぶ必要がある（ボタンから）
       
     } catch (error: any) {
       console.error("startVote transaction failed:", error);
@@ -2075,19 +2071,19 @@ export default function Play3Page() {
             <div
               style={{
                 display: 'inline-block',
-                padding: '6px 10px',
+                padding: '10px 14px',
                 backgroundColor: '#fef3c7',
                 color: '#92400e',
                 border: '2px solid #f59e0b',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
+                borderRadius: '8px',
+                fontSize: '0.8rem',
                 fontWeight: 'bold',
                 boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
-                lineHeight: '1.4',
-                maxWidth: '240px',
+                lineHeight: '1.5',
+                minWidth: '280px',
               }}
             >
-              <div style={{ marginBottom: '3px', fontSize: '0.8rem', color: '#78350f' }}>📋 条件</div>
+              <div style={{ marginBottom: '3px', fontSize: '0.85rem', color: '#78350f' }}>📋 条件 <span style={{ fontWeight: 'bold', color: '#d97706' }}>（話し合いフェーズ 4/4）</span></div>
               <div
                 style={{
                   display: 'flex',
@@ -2925,7 +2921,7 @@ export default function Play3Page() {
           })()}
 
         {/* カード詳細モーダル */}
-        {cardModal &&
+        {cardModal && !voteResultModal &&
           (() => {
             const info = getCard(cardModal.id);
             const users = selections.map((u) => {
@@ -2959,31 +2955,199 @@ export default function Play3Page() {
                 style={{
                   position: "fixed",
                   inset: 0,
-                  background: "rgba(0,0,0,0.5)",
+                  background: isCardModalMinimized ? "transparent" : "rgba(0,0,0,0.5)",
                   display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
+                  alignItems: isCardModalMinimized ? "flex-end" : "center",
+                  justifyContent: isCardModalMinimized ? "flex-start" : "center",
+                  padding: isCardModalMinimized ? 16 : 0,
                   zIndex: 120,
+                  pointerEvents: isCardModalMinimized ? "none" : "auto",
                 }}
                 onClick={() => {
-                  // 全員投票モードの最中または投票済みの場合は外クリックで閉じられない
-                  if (activeVote?.phase === "voting" || activeVote?.phase === "finalizing" || myVoteChoice) return;
+                  // 最小化中は何もしない
+                  if (isCardModalMinimized) return;
+                  
+                  // 投票中の場合は閉じる（投票小ウィンドウに戻る）
+                  if (activeVote?.phase === "voting" || activeVote?.phase === "finalizing") {
+                    closeCard();
+                    return;
+                  }
+                  
+                  // 投票済みの場合は外クリックで閉じられない
+                  if (myVoteChoice) return;
+                  
                   closeCard();
                 }}
               >
                 <div
                   style={{
-                    width: "min(92vw, 760px)",
+                    width: isCardModalMinimized ? 360 : "min(92vw, 760px)",
                     background: "#fff",
                     borderRadius: 12,
                     overflow: "hidden",
                     boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+                    pointerEvents: "auto",
+                    zIndex: isCardModalMinimized ? 110 : 130,
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
+                  {/* 最小化ヘッダー */}
                   <div
                     style={{
                       display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      padding: "10px 12px",
+                      borderBottom: "1px solid #e5e7eb",
+                      background: "#fff",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 900, color: "#111827", fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {info?.title}
+                        {isCardModalMinimized ? "（参照中）" : ""}
+                      </div>
+                      {(activeVote?.phase === "voting" || activeVote?.phase === "finalizing") && (
+                        <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700, marginTop: 2 }}>
+                          投票ウィンドウ
+                        </div>
+                      )}
+                    </div>
+                    {/* 小ウィンドウ化ボタン：投票中かつ投票カードの場合のみ表示 */}
+                    {(activeVote?.phase === "voting" || activeVote?.phase === "finalizing") && votingCardId === cardModal.id && (
+                    <button
+                      type="button"
+                      onClick={() => setIsCardModalMinimized((v) => !v)}
+                      style={{
+                        flexShrink: 0,
+                        padding: "8px 10px",
+                        borderRadius: 10,
+                        border: "1px solid #e5e7eb",
+                        background: "#fff",
+                        fontWeight: 900,
+                        color: "#111827",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {isCardModalMinimized ? "元に戻す" : "小ウィンドウ化"}
+                    </button>
+                    )}
+                  </div>
+
+                  {/* 最小化時の投票ボタンエリア */}
+                  {isCardModalMinimized && (
+                    <div
+                      style={{
+                        borderBottom: "1px solid #e5e7eb",
+                        padding: "12px 16px",
+                        background: "#f9fafb",
+                        display: "flex",
+                        gap: 8,
+                        flexDirection: "column",
+                      }}
+                    >
+                      {(() => {
+                        const cid = cardModal?.id;
+                        if (!cid) return null;
+
+                        const isVoting = activeVote?.phase === "voting" || activeVote?.phase === "finalizing";
+                        const myChoice = myVoteChoice || voteMap[myUserId];
+                        const hasVoted = !!myChoice;
+
+                        // 投票中は投票ボタンを表示
+                        if (isVoting) {
+                          const votedNo = myChoice === "no";
+                          const votedGo = myChoice === "go";
+                          const votedPending = myChoice === "pending";
+
+                          const handleVoteClickMinimized = async (vote: VoteChoice) => {
+                            if (hasVoted) return;
+                            if (!activeVote?.sessionId) return;
+                            await castVote(vote, activeVote.sessionId);
+                          };
+
+                          const createButtonStyle = (voted: boolean) => ({
+                            padding: "10px 14px",
+                            borderRadius: 10,
+                            border: "none",
+                            color: "#fff",
+                            fontWeight: 900,
+                            fontSize: 14,
+                            opacity: hasVoted && !voted ? 0.6 : 1,
+                            cursor: hasVoted && !voted ? "not-allowed" : "pointer",
+                            transition: "all .12s ease",
+                          });
+
+                          return (
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <button
+                                disabled={hasVoted && !votedNo}
+                                onClick={() => handleVoteClickMinimized("no")}
+                                style={{
+                                  ...createButtonStyle(votedNo),
+                                  background: votedNo ? "#1e40af" : "#60a5fa",
+                                  boxShadow: votedNo ? "0 0 0 3px rgba(96,165,250,0.35) inset" : undefined,
+                                  transform: votedNo ? "translateY(1px)" : undefined,
+                                }}
+                              >
+                                行かない
+                              </button>
+                              <button
+                                disabled={hasVoted && !votedPending}
+                                onClick={() => handleVoteClickMinimized("pending")}
+                                style={{
+                                  ...createButtonStyle(votedPending),
+                                  background: votedPending ? "#ca8a04" : "#fef08a",
+                                  color: votedPending ? "#fff" : "#713f12",
+                                  boxShadow: votedPending ? "0 0 0 3px rgba(254,240,138,0.35) inset" : undefined,
+                                  transform: votedPending ? "translateY(1px)" : undefined,
+                                }}
+                              >
+                                保留
+                              </button>
+                              <button
+                                disabled={hasVoted && !votedGo}
+                                onClick={() => handleVoteClickMinimized("go")}
+                                style={{
+                                  ...createButtonStyle(votedGo),
+                                  background: votedGo ? "#db2777" : "#f9a8d4",
+                                  boxShadow: votedGo ? "0 0 0 3px rgba(249,168,212,0.35) inset" : undefined,
+                                  transform: votedGo ? "translateY(1px)" : undefined,
+                                }}
+                              >
+                                行く
+                              </button>
+                            </div>
+                          );
+                        }
+
+                        // 投票中でない場合は「議論開始」ボタンを表示
+                        return (
+                          <button
+                            onClick={() => startVote(cid)}
+                            style={{
+                              padding: "12px 16px",
+                              borderRadius: 10,
+                              border: "none",
+                              background: "#059669",
+                              color: "#fff",
+                              fontWeight: 900,
+                              fontSize: 14,
+                              cursor: "pointer",
+                              transition: "all .12s ease",
+                            }}
+                          >
+                            議論開始
+                          </button>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  <div
+                    style={{
+                      display: isCardModalMinimized ? "none" : "flex",
                       gap: 16,
                       padding: 16,
                       borderBottom: "1px solid #e5e7eb",
@@ -3126,6 +3290,7 @@ export default function Play3Page() {
                   </div>
 
                   {/* 投票ボタンエリア */}
+                  {!isCardModalMinimized && (
                   <div
                     style={{
                       borderTop: "1px solid #e5e7eb",
@@ -3141,6 +3306,10 @@ export default function Play3Page() {
                       flexWrap: "wrap",
                     }}>
                       {(() => {
+                        // 投票小ウィンドウ以外のカードは投票を無効化
+                        const isMinimizedCard = activeVote?.cardId === cardModal.id;
+                        const isVotingDisabled = !isMinimizedCard && (activeVote?.phase === "voting" || activeVote?.phase === "finalizing");
+
                         const myChoice = myVoteChoice || voteMap[myUserId];
                         const hasVoted = !!myChoice;
                         const votedNo = myChoice === "no";
@@ -3167,7 +3336,7 @@ export default function Play3Page() {
                           padding: "10px 14px",
                           borderRadius: 10,
                           border: "none",
-                          background: votedNo ? "#1e40af" : "#60a5fa", // 柔らかい青
+                          background: isVotingDisabled ? "#6b7280" : (votedNo ? "#1e40af" : "#60a5fa"), // 投票不可時は黒塗り
                           color: "#fff",
                           fontWeight: 900,
                           boxShadow: votedNo
@@ -3175,14 +3344,14 @@ export default function Play3Page() {
                             : undefined,
                           transform: votedNo ? "translateY(1px)" : undefined,
                           transition: "all .12s ease",
-                          opacity: hasVoted && !votedNo ? 0.6 : 1,
-                          cursor: hasVoted && !votedNo ? "not-allowed" : "pointer",
+                          opacity: isVotingDisabled ? 0.6 : (hasVoted && !votedNo ? 0.6 : 1),
+                          cursor: isVotingDisabled ? "not-allowed" : (hasVoted && !votedNo ? "not-allowed" : "pointer"),
                         };
                         const goStyle: any = {
                           padding: "10px 14px",
                           borderRadius: 10,
                           border: "none",
-                          background: votedGo ? "#db2777" : "#f9a8d4", // ピンク
+                          background: isVotingDisabled ? "#6b7280" : (votedGo ? "#db2777" : "#f9a8d4"), // 投票不可時は黒塗り
                           color: "#fff",
                           fontWeight: 900,
                           boxShadow: votedGo
@@ -3190,23 +3359,23 @@ export default function Play3Page() {
                             : undefined,
                           transform: votedGo ? "translateY(1px)" : undefined,
                           transition: "all .12s ease",
-                          opacity: hasVoted && !votedGo ? 0.6 : 1,
-                          cursor: hasVoted && !votedGo ? "not-allowed" : "pointer",
+                          opacity: isVotingDisabled ? 0.6 : (hasVoted && !votedGo ? 0.6 : 1),
+                          cursor: isVotingDisabled ? "not-allowed" : (hasVoted && !votedGo ? "not-allowed" : "pointer"),
                         };
                         const pendingStyle: any = {
                           padding: "10px 14px",
                           borderRadius: 10,
                           border: "none",
-                          background: votedPending ? "#ca8a04" : "#fef08a", // 薄い黄色
-                          color: votedPending ? "#fff" : "#713f12",
+                          background: isVotingDisabled ? "#6b7280" : (votedPending ? "#ca8a04" : "#fef08a"), // 投票不可時は黒塗り
+                          color: isVotingDisabled ? "#fff" : (votedPending ? "#fff" : "#713f12"),
                           fontWeight: 900,
                           boxShadow: votedPending
                             ? "0 0 0 3px rgba(254,240,138,0.35) inset"
                             : undefined,
                           transform: votedPending ? "translateY(1px)" : undefined,
                           transition: "all .12s ease",
-                          opacity: hasVoted && !votedPending ? 0.6 : 1,
-                          cursor: hasVoted && !votedPending ? "not-allowed" : "pointer",
+                          opacity: isVotingDisabled ? 0.6 : (hasVoted && !votedPending ? 0.6 : 1),
+                          cursor: isVotingDisabled ? "not-allowed" : (hasVoted && !votedPending ? "not-allowed" : "pointer"),
                         };
 
                         // 「投票済み x/y」をexpectedVoteIdsベースで計算（セッション参加者が真実源）
@@ -3241,7 +3410,7 @@ export default function Play3Page() {
                         return (
                           <>
                             {/* 投票開始メッセージ */}
-                            {(activeVote?.phase === "voting" || activeVote?.phase === "finalizing") && (
+                            {!isCardModalMinimized && (activeVote?.phase === "voting" || activeVote?.phase === "finalizing") && (
                               <div
                                 style={{
                                   position: "absolute",
@@ -3274,9 +3443,15 @@ export default function Play3Page() {
                               // 黒枠カードの場合、状況を通知するメッセージを表示
                               const showWarning = hasBlackBorder && isVs;
 
+                              const isVoting = activeVote?.phase === "voting" || activeVote?.phase === "finalizing";
+
                               const handleVoteClick = async (vote: VoteChoice) => {
                                 const cid = cardModal?.id;
                                 if (!cid) return;
+                                // 投票小ウィンドウ以外では投票不可
+                                if (isVotingDisabled) return;
+                                // 参照のために最小化している間は、投票はできない
+                                if (isCardModalMinimized) return;
                                 if (hasVoted) return;
 
                                 console.log('vote click', {
@@ -3288,6 +3463,9 @@ export default function Play3Page() {
                                   modalCardId: cid,
                                 });
 
+                                // 投票中の場合のみボタンが機能
+                                if (!isVoting) return;
+
                                 // すでに同カードで投票中なら開始せずに投票だけ行う
                                 if (
                                   activeVote?.phase === "voting" &&
@@ -3297,9 +3475,12 @@ export default function Play3Page() {
                                   await castVote(vote, activeVote.sessionId);
                                   return;
                                 }
+                              };
 
-                                // 進行中が無ければ開始
-                                await startVote(vote, cid);
+                              const handleStartDiscussion = async () => {
+                                const cid = cardModal?.id;
+                                if (!cid) return;
+                                await startVote(cid);
                               };
                               
                               // 投票ボタンを表示
@@ -3322,38 +3503,61 @@ export default function Play3Page() {
                                     前回は意見が分かれました。もう一度投票できます
                                   </div>
                                 )}
-                                <div style={{ position: "relative" }}>
-                                <button
-                                  aria-pressed={votedNo}
-                                  disabled={hasVoted && !votedNo}
-                                  onClick={() => handleVoteClick("no")}
-                                  style={noStyle}
-                                >
-                                行かない
-                              </button>
-                            </div>
 
-                            <div style={{ position: "relative" }}>
-                              <button
-                                aria-pressed={votedPending}
-                                disabled={hasVoted && !votedPending}
-                                onClick={() => handleVoteClick("pending")}
-                                style={pendingStyle}
-                              >
-                                保留
-                              </button>
-                            </div>
+                                {/* 投票中は投票ボタンを表示、投票前は議論開始ボタンを表示 */}
+                                {isVoting ? (
+                                  <>
+                                    <div style={{ position: "relative" }}>
+                                      <button
+                                        aria-pressed={votedNo}
+                                        disabled={isCardModalMinimized || (hasVoted && !votedNo)}
+                                        onClick={() => handleVoteClick("no")}
+                                        style={noStyle}
+                                      >
+                                        行かない
+                                      </button>
+                                    </div>
 
-                            <div style={{ position: "relative" }}>
-                              <button
-                                aria-pressed={votedGo}
-                                disabled={hasVoted && !votedGo}
-                                onClick={() => handleVoteClick("go")}
-                                style={goStyle}
-                              >
-                                行く
-                              </button>
-                            </div>
+                                    <div style={{ position: "relative" }}>
+                                      <button
+                                        aria-pressed={votedPending}
+                                        disabled={isCardModalMinimized || (hasVoted && !votedPending)}
+                                        onClick={() => handleVoteClick("pending")}
+                                        style={pendingStyle}
+                                      >
+                                        保留
+                                      </button>
+                                    </div>
+
+                                    <div style={{ position: "relative" }}>
+                                      <button
+                                        aria-pressed={votedGo}
+                                        disabled={isCardModalMinimized || (hasVoted && !votedGo)}
+                                        onClick={() => handleVoteClick("go")}
+                                        style={goStyle}
+                                      >
+                                        行く
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={handleStartDiscussion}
+                                    style={{
+                                      padding: "12px 16px",
+                                      borderRadius: 10,
+                                      border: "none",
+                                      background: "#059669",
+                                      color: "#fff",
+                                      fontWeight: 900,
+                                      fontSize: 14,
+                                      cursor: "pointer",
+                                      transition: "all .12s ease",
+                                    }}
+                                  >
+                                    議論開始
+                                  </button>
+                                )}
                             </>
                             );
                             })()}
@@ -3362,6 +3566,7 @@ export default function Play3Page() {
                       })()}
                     </div>
                   </div>
+                  )}
 
                   {/* 投票状況表示エリア */}
                   {(() => {
@@ -3372,6 +3577,16 @@ export default function Play3Page() {
                       const mine = id === myUserId ? (myVoteChoice || v) : v;
                       return acc + (mine ? 1 : 0);
                     }, 0);
+
+                    const isVotingNow =
+                      !!activeVote?.sessionId &&
+                      (activeVote?.phase === "voting" || activeVote?.phase === "finalizing") &&
+                      activeVote?.cardId === cardModal.id;
+
+                    if (!isVotingNow) return null;
+
+                    // 最小化中は、背景参照を優先して投票状況パネルは表示しない
+                    if (isCardModalMinimized) return null;
 
                     // 投票済みユーザーのリスト
                     const votedUsers: Array<{ name: string; vote: VoteChoice }> = [];
@@ -3401,7 +3616,120 @@ export default function Play3Page() {
                       return acc + (mine === "pending" ? 1 : 0);
                     }, 0);
 
-                    return null;
+                    const getChoiceFor = (id: string): VoteChoice | null => {
+                      const v = voteMap[id];
+                      const mine = id === myUserId ? (myVoteChoice || v) : v;
+                      return mine || null;
+                    };
+
+                    const unvotedIds = expectedVoteIds.filter((id) => !getChoiceFor(id));
+                    const maxCount = Math.max(goCount, noCount, pendingCount);
+
+                    const renderNameChips = (ids: string[], bg: string, color: string) => {
+                      if (ids.length === 0) {
+                        return <span style={{ color: "#9ca3af", fontSize: 12 }}>なし</span>;
+                      }
+                      return (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {ids.map((id) => {
+                            const info = participantMap.get(id);
+                            const name = info?.name || id;
+                            const isMe = id === myUserId;
+                            return (
+                              <span
+                                key={id}
+                                title={id}
+                                style={{
+                                  background: bg,
+                                  color,
+                                  fontSize: 12,
+                                  fontWeight: isMe ? 900 : 700,
+                                  padding: "4px 8px",
+                                  borderRadius: 9999,
+                                  border: isMe ? "2px solid rgba(239,68,68,0.55)" : "1px solid rgba(0,0,0,0.06)",
+                                }}
+                              >
+                                {name}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      );
+                    };
+
+                    const goIdsNow = expectedVoteIds.filter((id) => getChoiceFor(id) === "go");
+                    const noIdsNow = expectedVoteIds.filter((id) => getChoiceFor(id) === "no");
+                    const pendingIdsNow = expectedVoteIds.filter((id) => getChoiceFor(id) === "pending");
+
+                    return (
+                      <div
+                        style={{
+                          borderTop: "1px solid #e5e7eb",
+                          padding: "14px 20px 18px",
+                          background: "#fff",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
+                          <div style={{ fontWeight: 900, color: "#111827" }}>
+                            投票状況 <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 800 }}>({votedCount}/{totalParticipantsCount})</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 800 }}>
+                            {activeVote?.phase === "finalizing" ? "集計中…" : "投票中"}
+                          </div>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginTop: 10 }}>
+                          <div
+                            style={{
+                              border: goCount === maxCount && maxCount > 0 ? "2px solid #db2777" : "1px solid #e5e7eb",
+                              borderRadius: 12,
+                              padding: 10,
+                              background: "rgba(249,168,212,0.18)",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ fontWeight: 900, color: "#9d174d" }}>行く</div>
+                              <div style={{ fontWeight: 900, color: "#9d174d" }}>{goCount}</div>
+                            </div>
+                            <div style={{ marginTop: 8 }}>{renderNameChips(goIdsNow, "#fce7f3", "#9d174d")}</div>
+                          </div>
+
+                          <div
+                            style={{
+                              border: noCount === maxCount && maxCount > 0 ? "2px solid #1e40af" : "1px solid #e5e7eb",
+                              borderRadius: 12,
+                              padding: 10,
+                              background: "rgba(96,165,250,0.16)",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ fontWeight: 900, color: "#1e40af" }}>行かない</div>
+                              <div style={{ fontWeight: 900, color: "#1e40af" }}>{noCount}</div>
+                            </div>
+                            <div style={{ marginTop: 8 }}>{renderNameChips(noIdsNow, "#dbeafe", "#1e40af")}</div>
+                          </div>
+
+                          <div
+                            style={{
+                              border: pendingCount === maxCount && maxCount > 0 ? "2px solid #ca8a04" : "1px solid #e5e7eb",
+                              borderRadius: 12,
+                              padding: 10,
+                              background: "rgba(254,240,138,0.35)",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ fontWeight: 900, color: "#92400e" }}>保留</div>
+                              <div style={{ fontWeight: 900, color: "#92400e" }}>{pendingCount}</div>
+                            </div>
+                            <div style={{ marginTop: 8 }}>{renderNameChips(pendingIdsNow, "#fef3c7", "#92400e")}</div>
+                          </div>
+                        </div>
+
+                        <div style={{ marginTop: 10, fontSize: 12, color: "#6b7280", fontWeight: 800 }}>
+                          未投票: {unvotedIds.length === 0 ? "なし" : unvotedIds.map((id) => participantMap.get(id)?.name || id).join("、")}
+                        </div>
+                      </div>
+                    );
                   })()}
                 </div>
               </div>

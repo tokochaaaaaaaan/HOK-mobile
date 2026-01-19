@@ -165,40 +165,11 @@ export default function WaitingPage() {
     "ザ・フライング・ダイナソー",
     "名探偵コナン 4-D ライブ・ショー ~星空の宝石(ジュエル)~",
     "クロミ・ライブ",
-    "パークサイド・グリル",
-    "SAIDO",
-    "デリシャス・ミー！ザ・クッキー・キッチン",
-    "スペース・キラー",
-    "ミニオン・ハチャメチャ・アイス",
-    "ミニオン・ハチャメチャ・ライド",
-    "マリオカート ~クッパの挑戦状~",
-    "ヨッシー・アドベンチャー",
-    "キノピオカフェ",
-    "ピットストップ・ポップコーン",
-    "三本の箒",
-    "オリバンダーの店",
-    "ハリー・ポッター・アンド・ザ・フォービドゥン・ジャーニー",
-    "フライト・オブ・ザ・ヒッポグリフ",
-    "ハリウッド・ドリーム・ザ・ライド",
-    "プレイング・ウィズおさるのジョージ",
-    "シング・オン・ツアー",
-    "スタジオ・スターズ・レストラン",
-    "ビバリーヒルズ・ブランジェリー",
-    "ハローキティのコーナーカフェ",
-    "スヌーピー・バックロット・カフェ",
-    "ハローキティのリボン・コレクション",
-    "エルモのゴーゴー・スケートボード",
-    "エルモのバブル・バブル",
-    "エルモのリトル・ドライブ",
-    "ハローキティのカップケーキ・ドリーム",
-    "ビッグバードのビッグトップ・サーカス",
-    "フライング・スヌーピー",
-    "モッピーのバルーン・トリップ",
   ];
 
   const allCards: CardInfo[] = useMemo(
     () =>
-      Array.from({ length: 39 }, (_, i) => {
+      Array.from({ length: 10 }, (_, i) => {
         const idx = i + 1;
         return {
           id: `card${idx}`,
@@ -1335,9 +1306,10 @@ export default function WaitingPage() {
           zIndex: 100,
           boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
           lineHeight: '1.6',
+          minWidth: '300px',
         }}
       >
-        <div style={{ marginBottom: '4px', fontSize: '0.9rem', color: '#78350f' }}>📋 条件</div>
+        <div style={{ marginBottom: '4px', fontSize: '0.9rem', color: '#78350f' }}>📋 条件 <span style={{ fontWeight: 'bold', color: '#d97706' }}>（1人フェーズ 3/4）</span></div>
         <div
           style={{
             display: 'flex',
@@ -1410,12 +1382,19 @@ export default function WaitingPage() {
                 color: "#fff",
               }}
             >
-              {selfReady ? '準備完了済み' : (isSaving ? '保存中…' : `合致率を見る (${matchReadyCount}/${totalParticipants || '-'})`)}
+              {selfReady ? '準備完了済み' : (isSaving ? '保存中…' : '合致率を見る')}
             </button>
             {/* 進行状況 */}
-            {totalParticipants > 0 && (
-              <div style={{ marginTop: 6, fontSize: 13, color: matchReadyCount === totalParticipants && totalParticipants>0 ? '#10B981' : '#6B7280' }}>
-                {matchReadyCount === totalParticipants && totalParticipants>0 ? '全員準備完了！まもなく合致率画面に移動します…' : `${matchReadyCount} / ${totalParticipants} 人が準備完了`}
+            {!showConfirmModal && totalParticipants > 0 && selfReady && (
+              <div style={{ marginTop: 6, fontSize: 13, color: matchReadyCount === totalParticipants && totalParticipants > 0 ? '#10B981' : '#6B7280' }}>
+                {matchReadyCount === totalParticipants && totalParticipants > 0
+                  ? '全員準備完了！まもなく合致率画面に移動します…'
+                  : `${matchReadyCount} / ${totalParticipants} 人が準備完了`}
+              </div>
+            )}
+            {!showConfirmModal && totalParticipants > 0 && !selfReady && (
+              <div style={{ marginTop: 6, fontSize: 13, fontWeight: 'bold', color: '#6B7280' }}>
+                「合致率を見る」を押し、最終確認することで1人フェーズ終了！
               </div>
             )}
             {/* 理由未入力の注意（ボタンは押せる） */}
@@ -1891,9 +1870,32 @@ export default function WaitingPage() {
               <div style={{ fontSize: "0.9rem", color: "#6b7280", marginBottom: 4 }}>
                 プラン名
               </div>
-              <div style={{ fontSize: "1.3rem", fontWeight: "bold", color: "#1f2937" }}>
-                {planName || "未設定"}
-              </div>
+              <input
+                type="text"
+                value={planName}
+                onChange={(e) => setPlanName(e.target.value)}
+                onBlur={() => setPendingSave(true)}
+                placeholder="プラン名を入力"
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  fontSize: "1.05rem",
+                  fontWeight: 700,
+                  color: "#1f2937",
+                  border: "2px solid #e5e7eb",
+                  borderRadius: 8,
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.border = "2px solid #60a5fa";
+                  e.currentTarget.style.boxShadow = "0 8px 22px rgba(99,102,241,0.16)";
+                }}
+                onBlurCapture={(e) => {
+                  (e.currentTarget as HTMLInputElement).style.border = "2px solid #e5e7eb";
+                  (e.currentTarget as HTMLInputElement).style.boxShadow = "none";
+                }}
+              />
             </div>
 
             <p style={{ marginBottom: 16, fontSize: "1.1rem", flexShrink: 0, textAlign: "center", fontWeight: 600 }}>
@@ -1931,7 +1933,15 @@ export default function WaitingPage() {
                     <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
                   ) : (
                     categories.veryWant.map((card) => (
-                      <div key={card.id} style={{ position: "relative", width: 80 }}>
+                      <div
+                        key={card.id}
+                        style={{ position: "relative", width: 80, cursor: "pointer" }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openReasonModal(card.id, "veryWant", "veryWant");
+                        }}
+                        title="クリックで理由を編集"
+                      >
                         <img
                           src={card.src}
                           alt={card.title}
@@ -2137,7 +2147,15 @@ export default function WaitingPage() {
                     <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginLeft: 8 }}>なし</p>
                   ) : (
                     categories.veryDont.map((card) => (
-                      <div key={card.id} style={{ position: "relative", width: 80 }}>
+                      <div
+                        key={card.id}
+                        style={{ position: "relative", width: 80, cursor: "pointer" }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openReasonModal(card.id, "veryDont", "veryDont");
+                        }}
+                        title="クリックで理由を編集"
+                      >
                         <img
                           src={card.src}
                           alt={card.title}
