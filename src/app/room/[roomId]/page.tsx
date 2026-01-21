@@ -40,19 +40,14 @@ export default function RoomPage() {
     return () => unsub();
   }, [roomId, router]);
 
-  // gameStarted を検知したら（ホスト/ゲスト問わず）開始フェーズに応じて遷移
+  // gameStarted を検知したら（ホスト/ゲスト問わず）secondに遷移
   useEffect(() => {
     if (!roomId || typeof roomId !== "string") return;
     if (!roomData?.gameStarted) return;
     if (hasNavigatedRef.current) return;
 
-    const phase = roomData?.startPhase;
     hasNavigatedRef.current = true;
-    if (phase === "discussion") {
-      router.push(`/room/${roomId}/discussion`);
-    } else {
-      router.push(`/room/${roomId}/second`);
-    }
+    router.push(`/room/${roomId}/second`);
   }, [roomData, roomId, router]);
 
   // 初回ロード時に自動参加
@@ -126,12 +121,8 @@ export default function RoomPage() {
       startPhase,
       gameStarted: true,
     }));
-    // ホスト自身は即座に選択フェーズへ飛ばす
-    if (startPhase === "discussion") {
-      router.push(`/room/${roomId}/discussion`);
-    } else {
-      router.push(`/room/${roomId}/second`);
-    }
+    // ホスト自身も常にsecondに遷移
+    router.push(`/room/${roomId}/second`);
   };
 
   if (!roomData) return null;

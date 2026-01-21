@@ -187,10 +187,10 @@ export default function NoteWindow({ currentPage }: NoteWindowProps) {
     loadNotes();
   }, [roomId, userName, canUseMulti]);
 
-  // discussionはメモを開いたら最初からmulti
+  // discussionはメモを開いたら最初からsolo（一人用）
   useEffect(() => {
     if (isOpen && isDiscussion) {
-      setMode("multi");
+      setMode("solo");
     }
   }, [isOpen, isDiscussion]);
 

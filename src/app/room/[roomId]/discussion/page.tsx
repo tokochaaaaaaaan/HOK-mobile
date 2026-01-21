@@ -8,6 +8,8 @@ import MapButton from "@/components/MapButton";
 import NoteWindow from "../components/NoteWindow";
 import styles from "../play/page.module.css";
 import { cards as allCards } from "@/data/cards";
+import { doc, onSnapshot } from "firebase/firestore";
+import { db } from "../../../../../lib/firebase";
 
 export default function DiscussionPage() {
   const { roomId } = useParams();
@@ -15,6 +17,53 @@ export default function DiscussionPage() {
 
   // ブラウザの戻るボタン無効化（play1の仕様を踏襲）
   usePreventBack();
+
+  // ページ更新を防止（確認ダイアログ表示）
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+      return "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, []);
+
+  // 参加者情報の取得
+  const [participants, setParticipants] = useState<Array<{ id: string; userName: string }>>([]);
+
+  useEffect(() => {
+    if (!roomId || typeof roomId !== "string") return;
+
+    const unsub = onSnapshot(
+      doc(db, "rooms", roomId),
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setParticipants([]);
+          return;
+        }
+        const data = snapshot.data();
+        const parts = data?.participants || {};
+        const list = Object.entries(parts).map(([id, value]) => {
+          const valueData = value as any;
+          const name = typeof valueData === 'string' 
+            ? (valueData.trim().length > 0 ? valueData.trim() : id)
+            : (valueData?.name?.trim() || id);
+          return {
+            id,
+            userName: name,
+          };
+        });
+        setParticipants(list);
+      }
+    );
+
+    return () => unsub();
+  }, [roomId]);
 
   // カード情報（概要と詳細） — playのUIから流用
   const cardInfo: { [key: string]: { overview: string; details: string } } = {
@@ -277,6 +326,42 @@ export default function DiscussionPage() {
 
   return (
     <div className={styles.wrapper}>
+      {/* 参加者リスト（右上） */}
+      <div
+        style={{
+          position: "fixed",
+          top: "12px",
+          right: "12px",
+          padding: "12px 16px",
+          backgroundColor: "#fff",
+          border: "2px solid #3b82f6",
+          borderRadius: "8px",
+          fontSize: "0.85rem",
+          fontWeight: "bold",
+          zIndex: 100,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+          maxHeight: "calc(100vh - 24px)",
+          overflowY: "auto",
+        }}
+      >
+        <div style={{ color: "#3b82f6", marginBottom: "8px", fontSize: "0.9rem" }}>
+          参加者
+        </div>
+        {participants.map((p) => (
+          <div
+            key={p.id}
+            style={{
+              color: "#374151",
+              paddingLeft: "4px",
+              marginBottom: "4px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            ・{p.userName}
+          </div>
+        ))}
+      </div>
+
       <div className={styles.mainCardSection} style={{ transform: `scale(${scale})` }}>
         <div className={styles.cardTitle}>{currentCard.title}</div>
 
@@ -372,12 +457,34 @@ export default function DiscussionPage() {
         </div>
       </div>
 
-      {/* 「すべて見る」モーダル */}
-      <div className={styles.viewAllWrapper}>
-        <button className={styles.viewAllBtn} onClick={() => {
-          setIndexBeforeModal(selectedIndex); // 現在のインデックスを記憶
-          setShowAll(true);
-        }}>
+      {/* 「すべて見る」ボタン */}
+      <div style={{ textAlign: 'center', margin: '20px 0' }}>
+        <button
+          onClick={() => {
+            setIndexBeforeModal(selectedIndex);
+            setShowAll(true);
+          }}
+          style={{
+            padding: '12px 32px',
+            backgroundColor: '#3b82f6',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '1rem',
+            fontWeight: '600',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.boxShadow = '0 6px 16px rgba(59, 130, 246, 0.4)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.3)';
+          }}
+        >
           すべて見る
         </button>
       </div>

@@ -12,11 +12,12 @@ export default function SecondPage() {
   const { roomId } = useParams();
   const router = useRouter();
   const [minStops, setMinStops] = useState<number | null>(null);
+  const [startPhase, setStartPhase] = useState<"solo" | "discussion">("solo");
 
   // ブラウザの戻るボタンを無効化
   usePreventBack();
 
-  // ルームから minStops を取得
+  // ルームから minStops と startPhase を取得
   useEffect(() => {
     if (!roomId || typeof roomId !== 'string') return;
     (async () => {
@@ -24,13 +25,18 @@ export default function SecondPage() {
       if (snap.exists()) {
         const data = snap.data();
         setMinStops(data.minStops ?? null);
+        setStartPhase(data.startPhase ?? "solo");
       }
     })();
   }, [roomId]);
 
-  // 「開始する」ボタン
+  // 「開始する」ボタン - startPhaseに応じて遷移先を決定
   const handleStart = () => {
-    router.push(`/room/${roomId}/play`);
+    if (startPhase === "discussion") {
+      router.push(`/room/${roomId}/discussion`);
+    } else {
+      router.push(`/room/${roomId}/play`);
+    }
   };
 
   return (
