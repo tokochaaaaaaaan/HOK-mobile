@@ -3,9 +3,9 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { usePreventBack } from "@/hooks/usePreventBack";
-import { collection, query, onSnapshot } from "firebase/firestore";
+import { collection, query, onSnapshot, setDoc, doc, serverTimestamp } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
-import { agreementOverall, convertSelectionsToMatrix } from "../../../../utils/agreement-calculator";
+import { cards } from "../../../../data/cards";
 
 // ================= Types =================
 
@@ -23,77 +23,7 @@ type UserSelection = {
   };
 };
 
-// ================= Confetti Animation =================
-
-const ConfettiCanvas: React.FC<{ trigger: boolean }> = ({ trigger }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!trigger) return;
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-
-    const pieces = Array.from({ length: 100 }, () => ({
-      x: Math.random() * window.innerWidth,
-      y: Math.random() * -500,
-      vx: Math.random() * 4 - 2,
-      vy: Math.random() * 3 + 2,
-      rot: Math.random() * Math.PI * 2,
-      vr: Math.random() * 0.2 - 0.1,
-      r: Math.random() * 6 + 3,
-      color: ['#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#6c5ce7', '#a55eea'][Math.floor(Math.random() * 6)],
-      shape: Math.random() > 0.5 ? 'circle' : 'square'
-    }));
-
-    let start = performance.now();
-    const duration = 7500; // ms
-
-    const draw = (t: number) => {
-      const elapsed = t - start;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      pieces.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.rot += p.vr;
-        if (p.y - 20 > window.innerHeight) {
-          p.y = -20;
-          p.x = Math.random() * window.innerWidth;
-        }
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(p.rot);
-        ctx.fillStyle = p.color;
-        if (p.shape === "circle") {
-          ctx.beginPath();
-            ctx.arc(0, 0, p.r, 0, Math.PI * 2);
-            ctx.fill();
-        } else {
-          ctx.fillRect(-p.r, -p.r, p.r * 2, p.r * 2 * (0.6 + Math.sin(p.rot) * 0.4));
-        }
-        ctx.restore();
-      });
-      if (elapsed < duration) {
-        animationRef.current = requestAnimationFrame(draw);
-      }
-    };
-
-    animationRef.current = requestAnimationFrame(draw);
-    return () => {
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
-    };
-  }, [trigger]);
-
-  // 背景の上、メインカードの下に来るよう z-index を高めに設定
-  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-30" />;
-};
+// Confetti animation removed for performance
 
 // ================= Main Page =================
 
@@ -112,15 +42,33 @@ export default function MatchResultPage() {
   // 演出フェーズ: 集計(waiting) -> アナウンス(announce) -> ドラムロール(drumroll) -> リビール(reveal)
   type Phase = 'waiting' | 'announce' | 'drumroll' | 'reveal';
   const [phase, setPhase] = useState<Phase>('waiting');
-  // 合致率計算完了フラグ
+  // 合致度集計完了フラグ
   const [agreementReady, setAgreementReady] = useState(false);
 
   // Data states
   const [userSelections, setUserSelections] = useState<UserSelection[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [overallAgreement, setOverallAgreement] = useState<number>(0);
-  // 表示用のカウントアップ値（reveal時にアニメーション）
-  const [displayValue, setDisplayValue] = useState<number>(0);
+  type PairDetail = {
+    otherUserId: string;
+    otherUserName: string;
+    plusCount: number; // 同符号（+/+ または -/-）
+    minusCount: number; // 異符号（+/-）
+    matchedTitles: string[];
+    unmatchedTitles: string[];
+    matchedIds: number[];
+    unmatchedIds: number[];
+  };
+  type ParticipantSummary = {
+    userId: string;
+    userName: string;
+    pairs: PairDetail[];
+    plusSum: number;
+    minusSum: number;
+  };
+  const [participantSummaries, setParticipantSummaries] = useState<ParticipantSummary[]>([]);
+  
+  // カード詳細モーダル用
+  const [detailModal, setDetailModal] = useState<{ show: boolean; userA: string; userB: string; pair: PairDetail | null }>({ show: false, userA: '', userB: '', pair: null });
 
   // ========== Data Subscription ==========
   useEffect(() => {
@@ -247,18 +195,17 @@ export default function MatchResultPage() {
     }
   }, [phase, agreementReady]);
 
-  // ========== Agreement Calculations ==========
+  // ========== Agreement Calculations (sum-based) ==========
   useEffect(() => {
-    console.log('Match result: Agreement calculation triggered', { userSelectionsLength: userSelections.length, userSelections });
+    console.log('Match result: Sum-based agreement calculation triggered', { userSelectionsLength: userSelections.length, userSelections });
     if (userSelections.length === 0) {
       console.log('Match result: No user selections, skipping calculation');
       return;
     }
-
     // 最低限の参加者数チェック
     if (userSelections.length < 2) {
-      console.log('Match result: Less than 2 participants, setting high agreement');
-      setOverallAgreement(85);
+      console.log('Match result: Less than 2 participants, nothing to compare');
+      setParticipantSummaries(userSelections.map(u => ({ userId: u.userId, userName: u.userName, pairs: [], plusSum: 0, minusSum: 0 })));
       setAgreementReady(true);
       return;
     }
@@ -307,24 +254,150 @@ export default function MatchResultPage() {
       users: uniqueSelections.map(s => s.userName || s.userId || s.user)
     });
 
-    try {
-      console.log('Match result: Converting selections to matrix...');
-      const matrix = convertSelectionsToMatrix(uniqueSelections);
-      console.log('Match result: Matrix conversion successful:', { matrixLength: matrix.length, participants: uniqueSelections.length });
+    (async () => {
+      try {
+      // カードIDを数値化した一覧（title取得のため）
+      const idToCard = new Map<number, { title: string; frontSrc: string }>();
+      cards.forEach(c => idToCard.set(c.id, { title: c.title, frontSrc: c.frontSrc }));
+
+      // ユーザーごとの符号マップ（cardId -> -1 | 0 | +1）
+      const userSignMaps = uniqueSelections.map(sel => {
+        const signMap = new Map<number, number>();
+        const toNum = (arr: Array<{id: string}>) => arr.map(x => Number(x.id)).filter(n => !Number.isNaN(n));
+        toNum(sel.categories.veryWant).forEach(id => signMap.set(id, +1));
+        toNum(sel.categories.want).forEach(id => signMap.set(id, +1));
+        toNum(sel.categories.neutral).forEach(id => signMap.set(id, 0));
+        toNum(sel.categories.dont).forEach(id => signMap.set(id, -1));
+        toNum(sel.categories.veryDont).forEach(id => signMap.set(id, -1));
+        return { userId: sel.userId, userName: sel.userName, signMap };
+      });
+
+      // 参加者ごとのサマリー構築
+      const summaries: ParticipantSummary[] = userSignMaps.map(u => ({ userId: u.userId, userName: u.userName, pairs: [], plusSum: 0, minusSum: 0 }));
+
+      // 全カードIDリスト（1..N）
+      const allCardIds = cards.map(c => c.id);
+
+      // ペア別に集計
+      for (let i = 0; i < userSignMaps.length; i++) {
+        for (let j = i + 1; j < userSignMaps.length; j++) {
+          const A = userSignMaps[i];
+          const B = userSignMaps[j];
+          let plus = 0;
+          let minus = 0;
+          const matchedTitles: string[] = [];
+          const unmatchedTitles: string[] = [];
+          const matchedIds: number[] = [];
+          const unmatchedIds: number[] = [];
+
+          for (const cardId of allCardIds) {
+            const a = A.signMap.get(cardId);
+            const b = B.signMap.get(cardId);
+            if (a == null || b == null) continue; // どちらかが未選択なら対象外
+            if (a === 0 || b === 0) continue; // ニュートラルはいずれの場合も加算しない
+            if (a === b) {
+              plus++;
+              const c = idToCard.get(cardId);
+              if (c) {
+                matchedTitles.push(c.title);
+                matchedIds.push(cardId);
+              }
+            } else if (a * b === -1) {
+              minus++;
+              const c = idToCard.get(cardId);
+              if (c) {
+                unmatchedTitles.push(c.title);
+                unmatchedIds.push(cardId);
+              }
+            }
+          }
+
+          // i側にペアを追加
+          summaries[i].pairs.push({
+            otherUserId: B.userId,
+            otherUserName: B.userName,
+            plusCount: plus,
+            minusCount: minus,
+            matchedTitles,
+            unmatchedTitles,
+            matchedIds,
+            unmatchedIds,
+          });
+          summaries[i].plusSum += plus;
+          summaries[i].minusSum += minus;
+
+          // j側にも対称にペアを追加
+          summaries[j].pairs.push({
+            otherUserId: A.userId,
+            otherUserName: A.userName,
+            plusCount: plus,
+            minusCount: minus,
+            matchedTitles,
+            unmatchedTitles,
+            matchedIds,
+            unmatchedIds,
+          });
+          summaries[j].plusSum += plus;
+          summaries[j].minusSum += minus;
+        }
+      }
+
+      setParticipantSummaries(summaries);
+
+      // Firestoreへ各参加者の合計を保存
+      summaries.forEach(async (s) => {
+        try {
+          await setDoc(doc(db, "rooms", String(roomId), "matchAnalysis", s.userId), {
+            userId: s.userId,
+            userName: s.userName,
+            plusSum: s.plusSum,
+            minusSum: s.minusSum,
+            computedAt: serverTimestamp(),
+          }, { merge: true });
+        } catch (e) {
+          console.error('Match result: Failed to write matchAnalysis', e);
+        }
+      });
+
+      // Firestoreへペアごとの詳細を保存
+      const pairPromises: Promise<void>[] = [];
+      for (let i = 0; i < userSignMaps.length; i++) {
+        for (let j = i + 1; j < userSignMaps.length; j++) {
+          const A = userSignMaps[i];
+          const B = userSignMaps[j];
+          const pairData = summaries[i].pairs.find(p => p.otherUserId === B.userId);
+          
+          if (pairData) {
+            const promise = (async () => {
+              try {
+                const pairDocId = [A.userId, B.userId].sort().join('_');
+                await setDoc(doc(db, "rooms", String(roomId), "matchAnalysisPairs", pairDocId), {
+                  userAId: A.userId,
+                  userAName: A.userName,
+                  userBId: B.userId,
+                  userBName: B.userName,
+                  plusCount: pairData.plusCount,
+                  minusCount: pairData.minusCount,
+                  computedAt: serverTimestamp(),
+                }, { merge: true });
+              } catch (e) {
+                console.error('Match result: Failed to write matchAnalysisPairs', e);
+              }
+            })();
+            pairPromises.push(promise);
+          }
+        }
+      }
       
-      console.log('Match result: Calculating overall agreement...');
-      const agreement = agreementOverall(matrix);
-      console.log('Match result: Overall agreement calculation successful:', agreement);
-      
-      setOverallAgreement(agreement); // agreementOverall内で既にMath.roundされている
+      await Promise.all(pairPromises);
+
       setAgreementReady(true);
-    } catch (error) {
-      console.error('Match result: Error calculating agreement:', error);
-      // エラー時は参加者数に基づいた妥当な値を設定
-      const fallbackValue = Math.max(50, Math.min(90, 70 + (uniqueSelections.length * 5)));
-      setOverallAgreement(fallbackValue);
-      setAgreementReady(true);
-    }
+      } catch (error) {
+        console.error('Match result: Error in sum-based calculation:', error);
+        setParticipantSummaries([]);
+        setAgreementReady(true);
+      }
+    })();
   }, [userSelections]);
 
   // ========== Phase Transition Effects ==========
@@ -361,7 +434,7 @@ export default function MatchResultPage() {
     }
   }, [phase]);
 
-  // リビールフェーズでバン音再生
+  // リビールフェーズでバン音再生（自動遷移は廃止）
   useEffect(() => {
     if (phase === 'reveal') {
       console.log('Match result: Starting reveal phase');
@@ -372,27 +445,7 @@ export default function MatchResultPage() {
           console.log('Match result: Could not play ban:', e)
         );
       }
-
-      // カウントアップ演出（1.2秒）
-      const start = performance.now();
-      const from = 0;
-      const to = Math.round(overallAgreement);
-      const duration = 1200;
-      const ease = (t: number) => 1 - Math.pow(1 - t, 3); // easeOutCubic
-      const tick = (t: number) => {
-        const p = Math.min(1, (t - start) / duration);
-        setDisplayValue(Math.round(from + (to - from) * ease(p)));
-        if (p < 1) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-
-      // 7秒後に自動遷移
-      const t = setTimeout(() => {
-        console.log('Match result: Auto-navigating to play3');
-        router.push(`/room/${roomId}/play3`);
-      }, 7000);
-      
-      return () => clearTimeout(t);
+      // 自動遷移なし
     }
   }, [phase, router, roomId]);
 
@@ -403,7 +456,7 @@ export default function MatchResultPage() {
       <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 flex items-center justify-center">
         <div className="text-center text-white">
           <div className="text-6xl mb-4">🔄</div>
-          <div className="text-2xl font-bold mb-2">合致率を計算中...</div>
+          <div className="text-2xl font-bold mb-2">合致度を集計中...</div>
           <div className="text-lg">参加者のデータを集計しています</div>
         </div>
       </div>
@@ -431,10 +484,7 @@ export default function MatchResultPage() {
         <source src="/audio/ban.mp3" type="audio/mpeg" />
       </audio>
 
-      {/* Confetti */}
-      <div style={{ position: 'absolute', inset: 0, zIndex: 30, pointerEvents: 'none' }}>
-        <ConfettiCanvas trigger={phase === 'reveal'} />
-      </div>
+
 
       {/* 背景の装飾グロー */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }}>
@@ -460,7 +510,7 @@ export default function MatchResultPage() {
               color: 'transparent',
               textShadow: '0 2px 8px rgba(0,0,0,0.25)'
             }}>
-              合致率計算完了！
+              合致度の集計が完了！
             </div>
             <div style={{ fontSize: '18px', opacity: 0.9 }}>結果を発表します...</div>
           </div>
@@ -477,81 +527,273 @@ export default function MatchResultPage() {
               backgroundClip: 'text',
               color: 'transparent'
             }}>
-              みんなの合致率は？
+              みんなの合致度は？
             </div>
           </div>
         )}
 
         {phase === 'reveal' && (
-          <div style={{ animation: 'bounceIn 0.6s ease-out both', position: 'relative', margin: '0 auto', width: 'min(94vw, 720px)', padding: '0 8px' }}>
-            {/* グロー背景 */}
-            <div style={{ position: 'absolute', inset: 0, zIndex: -1, borderRadius: 32, background: 'linear-gradient(135deg, rgba(251,191,36,0.25), rgba(236,72,153,0.20), rgba(79,70,229,0.25))', filter: 'blur(30px)', opacity: 0.9 }} />
-            <div style={{ position: 'relative', borderRadius: 28, border: '1px solid rgba(255,255,255,0.28)', background: 'rgba(255,255,255,0.10)', backdropFilter: 'blur(22px)', boxShadow: '0 0 45px -10px rgba(255,255,255,0.5)', padding: '28px 20px', overflow: 'hidden' }}>
-              {/* 角度のあるハイライト */}
-              <div style={{ position: 'absolute', top: '-50%', left: '25%', width: '120%', height: '120%', transform: 'rotate(12deg)', background: 'linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0) 35%)', pointerEvents: 'none' }} />
+          <div style={{ animation: 'bounceIn 0.6s ease-out both', position: 'relative', margin: '0 auto', width: 'min(96vw, 980px)', padding: '0 8px' }}>
+            <div style={{ position: 'relative', borderRadius: 28, border: '1px solid rgba(255,255,255,0.28)', background: 'rgba(255,255,255,0.10)', backdropFilter: 'blur(22px)', boxShadow: '0 0 45px -10px rgba(255,255,255,0.5)', padding: '20px', overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: participantSummaries.length === 2 ? '1fr 1fr' : '1fr 1fr', gridAutoRows: '1fr', gap: 16 }}>
+                {participantSummaries.map((p, idx) => {
+                  // 最大＋（気が合う）と最大−（気が合わない）を抽出
+                  const bestPlus = p.pairs.reduce<null | typeof p.pairs[number]>((acc, cur) => {
+                    if (!acc) return cur;
+                    if (cur.plusCount > acc.plusCount) return cur;
+                    if (cur.plusCount === acc.plusCount && cur.minusCount < acc.minusCount) return cur;
+                    return acc;
+                  }, null);
+                  const worstMinus = p.pairs.reduce<null | typeof p.pairs[number]>((acc, cur) => {
+                    if (!acc) return cur;
+                    if (cur.minusCount > acc.minusCount) return cur;
+                    if (cur.minusCount === acc.minusCount && cur.plusCount < acc.plusCount) return cur;
+                    return acc;
+                  }, null);
 
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
-                <div style={{ fontSize: '72px', marginBottom: 8, textShadow: '0 4px 10px rgba(0,0,0,0.35)' }}>🎊</div>
+                  // 他の参加者番号を取得（自分以外）
+                  const otherNumbers = participantSummaries
+                    .map((_, i) => i + 1)
+                    .filter(n => n !== idx + 1);
 
-                {/* 円形プログレスリング */}
-                <div style={{ position: 'relative', margin: '24px 0' }}>
-                  <div style={{ position: 'relative', width: 'min(60vw, 320px)', height: 'min(60vw, 320px)' }}>
-                    {/* 外周の光 */}
-                    <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'rgba(255,255,255,0.10)', filter: 'blur(20px)' }} />
-                    {/* 実リング */}
-                    <div style={{
-                      position: 'absolute', inset: 0, borderRadius: '50%',
-                      background: `conic-gradient(#fde047 ${Math.round(overallAgreement)}%, rgba(255,255,255,0.08) ${Math.round(overallAgreement)}%)`,
-                      WebkitMask: 'radial-gradient(circle at center, transparent 64%, black 65%)',
-                      mask: 'radial-gradient(circle at center, transparent 64%, black 65%)'
-                    }} />
-                    {/* 中央数値 */}
-                    <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
-                      <div style={{
-                        fontSize: 'clamp(48px, 14vw, 96px)',
-                        fontWeight: 900,
-                        backgroundImage: 'linear-gradient(135deg, #fef3c7, #fcd34d, #fb7185)',
-                        WebkitBackgroundClip: 'text',
-                        backgroundClip: 'text',
-                        color: 'transparent',
-                        textShadow: '0 4px 12px rgba(0,0,0,0.35)'
-                      }}>
-                        {displayValue}%
+                  return (
+                    <div key={p.userId} style={{ position: 'relative', border: '2px solid rgba(0,0,0,0.15)', borderRadius: 20, padding: '16px 14px', background: '#fff', minHeight: 200 }}>
+                      {/* ヘッダー行：ユーザ名と他参加者番号 */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: '#1f2937' }}>{p.userName}</div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {otherNumbers.map(n => {
+                            const targetUser = participantSummaries[n - 1];
+                            const pairData = p.pairs.find(pair => pair.otherUserId === targetUser?.userId);
+                            return (
+                              <div 
+                                key={n} 
+                                onClick={() => {
+                                  if (pairData) {
+                                    setDetailModal({ show: true, userA: p.userName, userB: targetUser.userName, pair: pairData });
+                                  }
+                                }}
+                                style={{ 
+                                  width: 24, 
+                                  height: 24, 
+                                  borderRadius: '50%', 
+                                  border: '2px solid #9ca3af', 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  justifyContent: 'center', 
+                                  fontSize: 12, 
+                                  fontWeight: 700, 
+                                  color: '#6b7280',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor = '#f3f4f6';
+                                  e.currentTarget.style.borderColor = '#4b5563';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor = 'transparent';
+                                  e.currentTarget.style.borderColor = '#9ca3af';
+                                }}
+                              >
+                                {n}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
+
+                      {/* 合致数（＋）ボックス */}
+                      <div style={{ border: '2px solid #000', borderRadius: 16, padding: '10px 12px', background: '#fff', marginBottom: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: '#10b981' }}>合致数</div>
+                          <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 900, color: '#10b981' }}>＋</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#1f2937' }}>：</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#1f2937', flex: 1 }}>{bestPlus?.otherUserName ?? 'ユーザなし'}</div>
+                          <div style={{ fontSize: 14, fontWeight: 900, color: '#10b981' }}>＋{bestPlus?.plusCount ?? 0}</div>
+                        </div>
+                      </div>
+
+                      {/* 合致数（－）ボックス */}
+                      <div style={{ border: '2px solid #000', borderRadius: 16, padding: '10px 12px', background: '#fff' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: '#9333ea' }}>合致数</div>
+                          <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #9333ea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 900, color: '#9333ea' }}>－</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#1f2937' }}>：</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#1f2937', flex: 1 }}>{worstMinus?.otherUserName ?? 'ユーザなし'}</div>
+                          <div style={{ fontSize: 14, fontWeight: 900, color: '#9333ea' }}>－{worstMinus?.minusCount ?? 0}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* カード詳細モーダル */}
+              {detailModal.show && detailModal.pair && detailModal.userA && detailModal.userB && (
+                <div 
+                  style={{ 
+                    position: 'fixed', 
+                    inset: 0, 
+                    backgroundColor: 'rgba(0,0,0,0.7)', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    zIndex: 100,
+                    padding: 16
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDetailModal({ show: false, userA: '', userB: '', pair: null });
+                  }}
+                >
+                  <div 
+                    style={{ 
+                      background: '#fff', 
+                      borderRadius: 20, 
+                      padding: '20px', 
+                      maxWidth: 800, 
+                      width: '100%',
+                      maxHeight: '80vh',
+                      overflowY: 'auto'
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* ヘッダー */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+                      <div style={{ background: 'linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%)', padding: '12px 16px', borderRadius: 12, textAlign: 'center' }}>
+                        <div style={{ fontSize: 18, fontWeight: 900, color: '#065f46' }}>{detailModal.userB}：＋</div>
+                      </div>
+                      <div style={{ background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)', padding: '12px 16px', borderRadius: 12, textAlign: 'center' }}>
+                        <div style={{ fontSize: 18, fontWeight: 900, color: '#fff' }}>{detailModal.userB}：－</div>
+                      </div>
+                    </div>
+
+                    {/* カード一覧 */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
+                      {/* 合致カード（＋） */}
+                      {detailModal.pair.matchedIds.map((cardId, index) => {
+                        const card = cards.find(c => c.id === cardId);
+                        if (!card) return null;
+                        
+                        // このカードに対する両ユーザーの選択を取得
+                        const userASelection = userSelections.find(u => u.userName === detailModal.userA);
+                        const userBSelection = userSelections.find(u => u.userName === detailModal.userB);
+                        
+                        const getCategoryLabel = (cats: any, id: string) => {
+                          if (cats.veryWant?.some((x: any) => String(x.id) === String(id))) return '特に行きたい';
+                          if (cats.want?.some((x: any) => String(x.id) === String(id))) return '行きたい';
+                          if (cats.neutral?.some((x: any) => String(x.id) === String(id))) return 'どちらでもいい';
+                          if (cats.dont?.some((x: any) => String(x.id) === String(id))) return '行きたくない';
+                          if (cats.veryDont?.some((x: any) => String(x.id) === String(id))) return '特に行きたくない';
+                          return '';
+                        };
+                        
+                        const labelA = userASelection ? getCategoryLabel(userASelection.categories, String(cardId)) : '';
+                        const labelB = userBSelection ? getCategoryLabel(userBSelection.categories, String(cardId)) : '';
+                        
+                        const getColor = (label: string) => {
+                          if (label.includes('特に行きたい')) return { bg: '#fecaca', border: '#dc2626', text: '#7f1d1d' };
+                          if (label.includes('行きたい')) return { bg: '#fbcfe8', border: '#db2777', text: '#831843' };
+                          if (label.includes('どちらでもいい')) return { bg: '#e5e7eb', border: '#6b7280', text: '#1f2937' };
+                          if (label.includes('行きたくない')) return { bg: '#bfdbfe', border: '#2563eb', text: '#1e3a8a' };
+                          if (label.includes('特に行きたくない')) return { bg: '#99f6e4', border: '#0d9488', text: '#134e4a' };
+                          return { bg: '#f3f4f6', border: '#9ca3af', text: '#4b5563' };
+                        };
+                        
+                        return (
+                          <div key={`matched-${cardId}-${index}`} style={{ border: '2px solid #10b981', borderRadius: 12, padding: 10, background: '#f0fdf4' }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#065f46', marginBottom: 6 }}>{card.title}</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {labelA && (() => {
+                                const color = getColor(labelA);
+                                return (
+                                  <div style={{ background: color.bg, border: `1px solid ${color.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 10, fontWeight: 700, color: color.text }}>1・{labelA}</div>
+                                );
+                              })()}
+                              {labelB && (() => {
+                                const color = getColor(labelB);
+                                return (
+                                  <div style={{ background: color.bg, border: `1px solid ${color.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 10, fontWeight: 700, color: color.text }}>2・{labelB}</div>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      
+                      {/* 不一致カード（－） */}
+                      {detailModal.pair.unmatchedIds.map((cardId, index) => {
+                        const card = cards.find(c => c.id === cardId);
+                        if (!card) return null;
+                        
+                        const userASelection = userSelections.find(u => u.userName === detailModal.userA);
+                        const userBSelection = userSelections.find(u => u.userName === detailModal.userB);
+                        
+                        const getCategoryLabel = (cats: any, id: string) => {
+                          if (cats.veryWant?.some((x: any) => String(x.id) === String(id))) return '特に行きたい';
+                          if (cats.want?.some((x: any) => String(x.id) === String(id))) return '行きたい';
+                          if (cats.neutral?.some((x: any) => String(x.id) === String(id))) return 'どちらでもいい';
+                          if (cats.dont?.some((x: any) => String(x.id) === String(id))) return '行きたくない';
+                          if (cats.veryDont?.some((x: any) => String(x.id) === String(id))) return '特に行きたくない';
+                          return '';
+                        };
+                        
+                        const labelA = userASelection ? getCategoryLabel(userASelection.categories, String(cardId)) : '';
+                        const labelB = userBSelection ? getCategoryLabel(userBSelection.categories, String(cardId)) : '';
+                        
+                        const getColor = (label: string) => {
+                          if (label.includes('特に行きたい')) return { bg: '#fecaca', border: '#dc2626', text: '#7f1d1d' };
+                          if (label.includes('行きたい')) return { bg: '#fbcfe8', border: '#db2777', text: '#831843' };
+                          if (label.includes('どちらでもいい')) return { bg: '#e5e7eb', border: '#6b7280', text: '#1f2937' };
+                          if (label.includes('行きたくない')) return { bg: '#bfdbfe', border: '#2563eb', text: '#1e3a8a' };
+                          if (label.includes('特に行きたくない')) return { bg: '#99f6e4', border: '#0d9488', text: '#134e4a' };
+                          return { bg: '#f3f4f6', border: '#9ca3af', text: '#4b5563' };
+                        };
+                        
+                        return (
+                          <div key={`unmatched-${cardId}-${index}`} style={{ border: '2px solid #9333ea', borderRadius: 12, padding: 10, background: '#faf5ff' }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#6b21a8', marginBottom: 6 }}>{card.title}</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {labelA && (() => {
+                                const color = getColor(labelA);
+                                return (
+                                  <div style={{ background: color.bg, border: `1px solid ${color.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 10, fontWeight: 700, color: color.text }}>1・{labelA}</div>
+                                );
+                              })()}
+                              {labelB && (() => {
+                                const color = getColor(labelB);
+                                return (
+                                  <div style={{ background: color.bg, border: `1px solid ${color.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 10, fontWeight: 700, color: color.text }}>2・{labelB}</div>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* 閉じるボタン */}
+                    <div style={{ marginTop: 20, textAlign: 'center' }}>
+                      <button
+                        onClick={() => setDetailModal({ show: false, userA: '', userB: '', pair: null })}
+                        style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#6b7280', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        閉じる
+                      </button>
                     </div>
                   </div>
                 </div>
+              )}
 
-                <div style={{ fontSize: 'clamp(22px, 5vw, 32px)', fontWeight: 800, letterSpacing: '0.02em', marginBottom: 8 }}>合致率</div>
-                <div style={{ fontSize: 'clamp(14px, 3.6vw, 18px)', fontWeight: 600, marginBottom: 12, minHeight: 40, display: 'flex', alignItems: 'center' }}>
-                  {overallAgreement >= 80 && '素晴らしい一致度です！'}
-                  {overallAgreement >= 60 && overallAgreement < 80 && '良い合致率ですね！'}
-                  {overallAgreement < 60 && '意見が分かれていますね'}
-                </div>
-                {/* 参加者とプラン名の表示 */}
-                {userSelections.length > 0 && (
-                  <div style={{ 
-                    marginTop: 16, 
-                    padding: "12px 16px", 
-                    backgroundColor: "rgba(255,255,255,0.15)", 
-                    borderRadius: 12,
-                    fontSize: "0.9rem",
-                    lineHeight: 1.6
-                  }}>
-                    <div style={{ fontWeight: 700, marginBottom: 8, fontSize: "1rem" }}>参加者</div>
-                    {userSelections.map((selection, idx) => (
-                      <div key={idx} style={{ marginBottom: 4 }}>
-                        <span style={{ fontWeight: 600 }}>{selection.userName || selection.userId}</span>
-                        {selection.planName && (
-                          <span style={{ opacity: 0.9, marginLeft: 8 }}>
-                            プラン: {selection.planName}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div style={{ fontSize: '12px', opacity: 0.8, marginTop: 6 }}>まもなく詳細分析画面に移動します...</div>
+              {/* 下部ボタン */}
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+                <button
+                  onClick={() => router.push(`/room/${roomId}/play3`)}
+                  style={{ padding: '12px 24px', borderRadius: 8, fontWeight: 800, fontSize: 16, border: 'none', cursor: 'pointer', backgroundColor: '#10b981', color: '#fff' }}
+                >
+                  確認を終了して議論フェーズへ進む
+                </button>
               </div>
             </div>
           </div>

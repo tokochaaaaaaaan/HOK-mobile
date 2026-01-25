@@ -27,26 +27,11 @@ import { normalizeCategories } from "../../../../utils/normalizeCategories";
 import MapButton from "@/components/MapButton";
 import NoteWindow from "../components/NoteWindow";
 import styles from "./page.module.css";
+import { parseReason } from "../../../../utils/reasonIcons";
 
 const PLAY3_VOTE_SESSIONS = "play3VoteSessions";
 const PLAY3_VOTE_RESULTS = "play3VoteResults";
 
-// 理由アイコンの定義
-const reasonIcons = [
-  { key: "gourmet", src: "/emoji/gourmet.svg", emoji: "🍽️", text: "食", fullText: "食事" },
-  { key: "photo", src: "/emoji/photo.svg", emoji: "📷", text: "写", fullText: "写真映え" },
-  { key: "thrill", src: "/emoji/thrill.svg", emoji: "🎢", text: "激", fullText: "スリル" },
-  { key: "experience", src: "/emoji/experience.svg", emoji: "🎯", text: "体", fullText: "体験" },
-  { key: "shopping", src: "/emoji/shopping.svg", emoji: "🛍️", text: "買", fullText: "買い物" },
-  { key: "design", src: "/emoji/design.svg", emoji: "🏛️", text: "建築", fullText: "建築・デザイン" },
-  { key: "scenery", src: "/emoji/scenery.svg", emoji: "🌅", text: "景", fullText: "景色" },
-  { key: "time", src: "/emoji/time.svg", emoji: "⏰", text: "時", fullText: "時間" },
-  { key: "cost", src: "/emoji/cost.svg", emoji: "💰", text: "¥", fullText: "コスパ" },
-  { key: "friends", src: "/emoji/friends.svg", emoji: "👥", text: "友", fullText: "友達と一緒に" },
-  { key: "family", src: "/emoji/family.svg", emoji: "👨‍👩‍👧‍👦", text: "家", fullText: "家族向け" },
-  { key: "relax", src: "/emoji/relax.svg", emoji: "🧘", text: "休", fullText: "リラックス" },
-  { key: "other", src: "/emoji/other.svg", emoji: "❗", text: "他", fullText: "その他" }
-];
 
 type VoteChoice = "go" | "no" | "pending";
 type VotePhase = "idle" | "voting" | "finalizing" | "finished";
@@ -1269,6 +1254,9 @@ export default function Play3Page() {
               cardName: data.voteResult.cardName,
               message: data.voteResult.message,
             });
+            // 投票結果が表示されたらカードモーダルを閉じる
+            setCardModal(null);
+            setIsCardModalMinimized(false);
           }
         } else if (data.voteResult === null && voteResultModal) {
           // voteResultがnullになったら、全員のモーダルを閉じる
@@ -2026,7 +2014,7 @@ export default function Play3Page() {
     neuCount: neuSorted.length,
     uiLocked,
     uiLockReason,
-    canEndGame: vsSorted.length === 0 && goSorted.length >= minStops && !uiLocked
+    canEndGame: vsSorted.length === 0 && goSorted.length === minStops && !uiLocked
   });
 
   // カード幅を固定
@@ -2034,7 +2022,7 @@ export default function Play3Page() {
 
   const canNormalEnd =
     vsSorted.length === 0 &&
-    goSorted.length >= minStops &&
+    goSorted.length === minStops &&
     !uiLocked &&
     !(play3Ready[myUserId] ? true : false);
 
@@ -2100,15 +2088,15 @@ export default function Play3Page() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  color: (goSorted.length >= minStops) ? '#065f46' : '#92400e'
+                  color: (goSorted.length === minStops) ? '#065f46' : '#92400e'
                 }}
               >
-                <span>{(goSorted.length >= minStops) ? '✅' : '⏳'}</span>
-                <span>・「行く」に{minStops}枚以上配置しよう！</span>
+                <span>{(goSorted.length === minStops) ? '✅' : '⏳'}</span>
+                <span>・「行く」が{minStops}枚になるように決めよう！</span>
               </div>
               <div style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px solid #fbbf24', fontSize: '0.7rem' }}>
                 現在:
-                <span style={{ marginLeft: 4, color: (goSorted.length >= minStops) ? '#065f46' : '#dc2626' }}>行く {goIds.length}枚</span>
+                <span style={{ marginLeft: 4, color: (goSorted.length === minStops) ? '#065f46' : '#dc2626' }}>行く {goIds.length}枚</span>
                 <span style={{ marginLeft: 8, color: (vsSorted.length === 0) ? '#065f46' : '#dc2626' }}>/ VS {vsIds.length}枚</span>
               </div>
             </div>
@@ -2116,9 +2104,7 @@ export default function Play3Page() {
           <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
               {renderAvatars()}
-              <div className={styles.agreementRate} style={{ fontSize: '0.9rem' }}>
-                合致率：{overallAgreement.toFixed(0)}％
-              </div>
+              {/* 合致率表示を削除 */}
             </div>
           </div>
         </div>
@@ -2817,37 +2803,9 @@ export default function Play3Page() {
                             >
                               {list.map((cardData, idx) => {
                                 const info = getCard(cardData.id);
-                                const reason = (cardData as any).reason || "";
-                                
-                                // 理由を解析してアイコンとテキストを分離
-                                let displayEmoji = "";
-                                let displayText = "";
-                                
-                                if (reason && reason.trim()) {
-                                  const colonIndex = reason.indexOf(':');
-                                  if (colonIndex !== -1) {
-                                    // "fullText:customText" 形式
-                                    const iconPart = reason.substring(0, colonIndex);
-                                    const customPart = reason.substring(colonIndex + 1);
-                                    const reasonIcon = reasonIcons.find(icon => icon.fullText === iconPart);
-                                    
-                                    if (reasonIcon) {
-                                      displayEmoji = reasonIcon.emoji;
-                                      displayText = customPart;
-                                    } else {
-                                      displayText = reason;
-                                    }
-                                  } else {
-                                    // fullTextのみ、またはカスタムテキストのみ
-                                    const reasonIcon = reasonIcons.find(icon => icon.fullText === reason);
-                                    if (reasonIcon) {
-                                      displayEmoji = reasonIcon.emoji;
-                                      displayText = reasonIcon.fullText;
-                                    } else {
-                                      displayText = reason;
-                                    }
-                                  }
-                                }
+                                const parsed = parseReason((cardData as any).reason);
+                                const displayEmoji = parsed.emoji || "";
+                                const displayText = parsed.text || "";
 
                                 return (
                                   <div
@@ -2900,9 +2858,11 @@ export default function Play3Page() {
                                               {displayEmoji}
                                             </span>
                                           )}
-                                          <span style={{ flex: 1 }}>
-                                            {displayText}
-                                          </span>
+                                          {displayText && (
+                                            <span style={{ flex: 1 }}>
+                                              {displayText}
+                                            </span>
+                                          )}
                                         </div>
                                       )}
                                     </div>
@@ -3278,9 +3238,24 @@ export default function Play3Page() {
                                 style={{
                                   color: "#000000",
                                   marginLeft: "auto",
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6,
                                 }}
                               >
-                                理由: {u.reason || "（なし）"}
+                                {(() => {
+                                  const { emoji, text } = parseReason(u.reason);
+                                  return (
+                                    <>
+                                      {emoji && (
+                                        <span style={{ fontSize: 16 }}>{emoji}</span>
+                                      )}
+                                      <span>
+                                        {text && text.trim() ? text : "（なし）"}
+                                      </span>
+                                    </>
+                                  );
+                                })()}
                               </div>
                             </div>
                           </div>

@@ -1365,7 +1365,7 @@ export default function WaitingPage() {
               disabled={interactionLocked}
             />
           </div>
-          {/* 合致率ボタン */}
+          {/* 合致度ボタン */}
           <div style={{ marginTop: 14 }}>
             <button
               onClick={handleFinishClick}
@@ -1382,19 +1382,19 @@ export default function WaitingPage() {
                 color: "#fff",
               }}
             >
-              {selfReady ? '準備完了済み' : (isSaving ? '保存中…' : '合致率を見る')}
+              {selfReady ? '準備完了済み' : (isSaving ? '保存中…' : '合致度を見る')}
             </button>
             {/* 進行状況 */}
             {!showConfirmModal && totalParticipants > 0 && selfReady && (
               <div style={{ marginTop: 6, fontSize: 13, color: matchReadyCount === totalParticipants && totalParticipants > 0 ? '#10B981' : '#6B7280' }}>
                 {matchReadyCount === totalParticipants && totalParticipants > 0
-                  ? '全員準備完了！まもなく合致率画面に移動します…'
+                  ? '全員準備完了！まもなく合致度画面に移動します…'
                   : `${matchReadyCount} / ${totalParticipants} 人が準備完了`}
               </div>
             )}
             {!showConfirmModal && totalParticipants > 0 && !selfReady && (
               <div style={{ marginTop: 6, fontSize: 13, fontWeight: 'bold', color: '#6B7280' }}>
-                「合致率を見る」を押し、最終確認することで1人フェーズ終了！
+                「合致度を見る」を押し、最終確認することで1人フェーズ終了！
               </div>
             )}
             {/* 理由未入力の注意（ボタンは押せる） */}
@@ -2258,7 +2258,7 @@ export default function WaitingPage() {
                   fontWeight: 600,
                 }}
               >
-                {isSaving ? "保存中..." : "確定して議論に進む"}
+                {isSaving ? "保存中..." : "確定して合致度を確認"}
               </button>
               <button
                 onClick={() => setShowConfirmModal(false)}

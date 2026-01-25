@@ -9,23 +9,8 @@ import { normalizeCategories } from '../../../../utils/normalizeCategories';
 import MapButton from '@/components/MapButton';
 import NoteWindow from '../components/NoteWindow';
 import { useUser } from '@/context/UserContext';
+import { parseReason } from '../../../../utils/reasonIcons';
 
-// 理由アイコンの定義
-const reasonIcons = [
-  { key: "gourmet", src: "/emoji/gourmet.svg", emoji: "🍽️", text: "食", fullText: "食事" },
-  { key: "photo", src: "/emoji/photo.svg", emoji: "📷", text: "写", fullText: "写真映え" },
-  { key: "thrill", src: "/emoji/thrill.svg", emoji: "🎢", text: "激", fullText: "スリル" },
-  { key: "experience", src: "/emoji/experience.svg", emoji: "🎯", text: "体", fullText: "体験" },
-  { key: "shopping", src: "/emoji/shopping.svg", emoji: "🛍️", text: "買", fullText: "買い物" },
-  { key: "design", src: "/emoji/design.svg", emoji: "🏛️", text: "建築", fullText: "建築・デザイン" },
-  { key: "scenery", src: "/emoji/scenery.svg", emoji: "🌅", text: "景", fullText: "景色" },
-  { key: "time", src: "/emoji/time.svg", emoji: "⏰", text: "時", fullText: "時間" },
-  { key: "cost", src: "/emoji/cost.svg", emoji: "💰", text: "¥", fullText: "コスパ" },
-  { key: "friends", src: "/emoji/friends.svg", emoji: "👥", text: "友", fullText: "友達と一緒に" },
-  { key: "family", src: "/emoji/family.svg", emoji: "👨‍👩‍👧‍👦", text: "家", fullText: "家族向け" },
-  { key: "relax", src: "/emoji/relax.svg", emoji: "🧘", text: "休", fullText: "リラックス" },
-  { key: "other", src: "/emoji/other.svg", emoji: "❗", text: "他", fullText: "その他" }
-];
 
 // カード名定義
 const cardTitles = [
@@ -101,6 +86,24 @@ type FinalSelectionDoc = {
    };
  };
 
+type MatchAnalysisData = {
+  userId: string;
+  userName: string;
+  plusSum: number;
+  minusSum: number;
+  computedAt?: any;
+};
+
+type MatchAnalysisPairData = {
+  userAId: string;
+  userAName: string;
+  userBId: string;
+  userBName: string;
+  plusCount: number;
+  minusCount: number;
+  computedAt?: any;
+};
+
 // 表示順
 const SECTION_ORDER: Array<{ key: string; label: string; color: string; border: string; collapsible: boolean }> = [
   { key: 'go', label: '行く', color: '#fee2e2', border: '#fca5a5', collapsible: true },
@@ -129,6 +132,8 @@ export default function ResultPage() {
   const [allCardsModalOpen, setAllCardsModalOpen] = useState(false);
   const [categoryDetailModal, setCategoryDetailModal] = useState<{ userId: string; category: string } | null>(null);
   const [expandedCard, setExpandedCard] = useState<{ id: string; flipped: boolean } | null>(null);
+  const [matchAnalysis, setMatchAnalysis] = useState<MatchAnalysisData[]>([]);
+  const [matchAnalysisPairs, setMatchAnalysisPairs] = useState<MatchAnalysisPairData[]>([]);
 
   // モーダル開閉時にbodyのスクロールを制御
   useEffect(() => {
@@ -177,6 +182,49 @@ export default function ResultPage() {
     return () => unsub();
   }, [roomId]);
 
+  // matchAnalysis 購読（合致度データ）
+  useEffect(() => {
+    if (!roomId || typeof roomId !== 'string') return;
+    const qMatch = query(collection(db, 'rooms', roomId, 'matchAnalysis'));
+    const unsub = onSnapshot(qMatch, snap => {
+      const analysis: MatchAnalysisData[] = [];
+      snap.docs.forEach(d => {
+        const data = d.data();
+        analysis.push({
+          userId: data.userId,
+          userName: data.userName,
+          plusSum: data.plusSum || 0,
+          minusSum: data.minusSum || 0,
+          computedAt: data.computedAt
+        });
+      });
+      setMatchAnalysis(analysis);
+    });
+    return () => unsub();
+  }, [roomId]);
+
+  // matchAnalysisPairs 購読（ペアごとの詳細合致度）
+  useEffect(() => {
+    if (!roomId || typeof roomId !== 'string') return;
+    const qPairs = query(collection(db, 'rooms', roomId, 'matchAnalysisPairs'));
+    const unsub = onSnapshot(qPairs, snap => {
+      const pairs: MatchAnalysisPairData[] = [];
+      snap.docs.forEach(d => {
+        const data = d.data();
+        pairs.push({
+          userAId: data.userAId,
+          userAName: data.userAName,
+          userBId: data.userBId,
+          userBName: data.userBName,
+          plusCount: data.plusCount || 0,
+          minusCount: data.minusCount || 0,
+          computedAt: data.computedAt
+        });
+      });
+      setMatchAnalysisPairs(pairs);
+    });
+    return () => unsub();
+  }, [roomId]);
   // play3Assignments 購読（go/no/neutralの最終決定）
   useEffect(() => {
     if (!roomId || typeof roomId !== 'string') return;
@@ -398,7 +446,7 @@ export default function ResultPage() {
         <div style={{ marginBottom: 20, textAlign: 'center' }}>
           <h1 style={{ fontSize: 32, fontWeight: 900, letterSpacing: '.5px', margin: 0, color: '#0f172a' }}>最終結果</h1>
           <div style={{ marginTop: 8, color: '#475569', fontSize: 14 }}>参加者: {participantsSummary || '—'}</div>
-          <div style={{ marginTop: 6, fontSize: 28, fontWeight: 800, backgroundImage: 'linear-gradient(135deg,#0ea5e9,#2563eb,#4f46e5)', WebkitBackgroundClip: 'text', color: 'transparent' }}>合致率 {overallAgreement.toFixed(0)}%</div>
+          {/* 合致率表示を削除 */}
         </div>
 
         {/* プラン一覧エリア */}
@@ -417,6 +465,53 @@ export default function ResultPage() {
             </div>
           ) : <div style={{ fontSize: 12, color: '#64748b' }}>データなし</div>}
         </div>
+
+        {/* 合致度サマリーエリア */}
+        {matchAnalysis.length > 0 && (
+          <div style={{ margin: '0 auto 32px', maxWidth: 900, background: 'linear-gradient(135deg,#f0fdf4,#ffffff)', border: '2px solid #10b981', borderRadius: 18, padding: '14px 18px', boxShadow: '0 6px 18px -8px rgba(16,185,129,0.15)' }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#065f46', marginBottom: 12, letterSpacing: '.5px' }}>合致度サマリー</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {matchAnalysis.map((match) => {
+                const userPairs = matchAnalysisPairs.filter(p => 
+                  p.userAId === match.userId || p.userBId === match.userId
+                );
+                return (
+                  <div key={match.userId} style={{ background: '#fff', border: '1px solid #6ee7b7', borderRadius: 12, padding: '12px 16px' }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 8 }}>{match.userName}</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {userPairs.length > 0 ? (
+                        userPairs.map((pair) => {
+                          const otherName = pair.userAId === match.userId ? pair.userBName : pair.userAName;
+                          return (
+                            <div 
+                              key={`${pair.userAId}_${pair.userBId}`}
+                              style={{ 
+                                background: '#f9fafb', 
+                                border: '1px solid #d1d5db', 
+                                borderRadius: 8, 
+                                padding: '8px 12px',
+                                fontSize: 12,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8
+                              }}
+                            >
+                              <span style={{ fontWeight: 700, color: '#1f2937' }}>vs {otherName}</span>
+                              <span style={{ fontWeight: 800, color: '#10b981' }}>＋{pair.plusCount}</span>
+                              <span style={{ fontWeight: 800, color: '#9333ea' }}>−{pair.minusCount}</span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#9ca3af' }}>ペア情報なし</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
           {/* 行く（柔らかい赤） */}
@@ -671,33 +766,10 @@ export default function ResultPage() {
                       const reason = (card as any).reason || '';
                       const showReason = reason && (categoryDetailModal.category === 'veryWant' || categoryDetailModal.category === 'veryDont');
                       
-                      // 理由を解析してアイコンとテキストを分離
-                      let displayEmoji = "";
-                      let displayText = "";
-                      
-                      if (reason && reason.trim()) {
-                        const colonIndex = reason.indexOf(':');
-                        if (colonIndex !== -1) {
-                          const iconPart = reason.substring(0, colonIndex);
-                          const customPart = reason.substring(colonIndex + 1);
-                          const reasonIcon = reasonIcons.find(icon => icon.fullText === iconPart);
-                          
-                          if (reasonIcon) {
-                            displayEmoji = reasonIcon.emoji;
-                            displayText = customPart;
-                          } else {
-                            displayText = reason;
-                          }
-                        } else {
-                          const reasonIcon = reasonIcons.find(icon => icon.fullText === reason);
-                          if (reasonIcon) {
-                            displayEmoji = reasonIcon.emoji;
-                            displayText = reasonIcon.fullText;
-                          } else {
-                            displayText = reason;
-                          }
-                        }
-                      }
+                      // 理由を解析してアイコンとテキストを分離（ラベル非表示）
+                      const parsed = parseReason(reason);
+                      const displayEmoji = parsed.emoji || "";
+                      const displayText = parsed.text || "";
                       
                       return (
                         <div 
@@ -815,9 +887,29 @@ export default function ResultPage() {
                             <div style={{ fontWeight: 800, color: '#0f172a' }}>{u.userName}</div>
                             <div style={{ background: st.bg, color: st.text, border: `1px solid ${st.border}`, borderRadius: 9999, padding: '2px 10px', fontSize: 12, fontWeight: 800 }}>{categoryNames[u.category] || u.category}</div>
                           </div>
-                          <div style={{ fontSize: 12, color: showReason ? '#334155' : '#94a3b8', fontWeight: 600, lineHeight: 1.4 }}>
-                            {showReason ? (u.reason || '') : '（理由なし / 特に系以外）'}
-                          </div>
+                          {showReason ? (() => {
+                            const parsed = parseReason(u.reason || '');
+                            const emoji = parsed.emoji || '';
+                            const text = parsed.text || '';
+                            if (!emoji && !text) return (
+                              <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, lineHeight: 1.4 }}>
+                                （理由なし）
+                              </div>
+                            );
+                            return (
+                              <div style={{ 
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                fontSize: 12, color: '#334155', fontWeight: 600, lineHeight: 1.4 
+                              }}>
+                                {emoji && <span style={{ fontSize: 14 }}>{emoji}</span>}
+                                <span>{text}</span>
+                              </div>
+                            );
+                          })() : (
+                            <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, lineHeight: 1.4 }}>
+                              （理由なし / 特に系以外）
+                            </div>
+                          )}
                         </div>
                       );
                     })}
