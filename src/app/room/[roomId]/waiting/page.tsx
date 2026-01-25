@@ -19,6 +19,7 @@ import { db } from "../../../../../lib/firebase";
 import MapButton from "@/components/MapButton";
 import NoteWindow from "../components/NoteWindow";
 import styles from "./page.module.css";
+import { cards as baseCards } from "@/data/cards";
 
 // ============================================================
 // waiting/page.tsx – クリック移動＋理由モーダル＆確認ウィンドウ 完全版
@@ -153,31 +154,15 @@ export default function WaitingPage() {
 
   const roomId = (params?.roomId as string) || "";
 
-  // 39枚のカード定義（USJ画像スキーマに合わせ）
-  const cardTitles = [
-    "ジョーズ",
-    "アミティ・ボードウォーク・ゲーム",
-    "ウォーターワールド",
-    "ザ・ドラゴン・パール",
-    "ロンバーズ・ランディング",
-    "ロストワールド・レストラン",
-    "ジュラシック・パーク・ダイナソー・ミート&グリート",
-    "ザ・フライング・ダイナソー",
-    "名探偵コナン 4-D ライブ・ショー ~星空の宝石(ジュエル)~",
-    "クロミ・ライブ",
-  ];
-
+  // 39枚のカード定義（共通データから生成）
   const allCards: CardInfo[] = useMemo(
     () =>
-      Array.from({ length: 10 }, (_, i) => {
-        const idx = i + 1;
-        return {
-          id: `card${idx}`,
-          title: cardTitles[i],
-          src: `/pngs/USJ_${idx}_surface-1.png`,
-          backSrc: `/pngs/back/USJ_${idx}_back-1.png`,
-        } as CardInfo;
-      }),
+      baseCards.map((c) => ({
+        id: `card${c.id}`,
+        title: c.title,
+        src: c.frontSrc,
+        backSrc: c.backSrc,
+      })),
     []
   );
 

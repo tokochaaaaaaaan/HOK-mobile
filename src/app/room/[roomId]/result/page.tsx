@@ -10,60 +10,14 @@ import MapButton from '@/components/MapButton';
 import NoteWindow from '../components/NoteWindow';
 import { useUser } from '@/context/UserContext';
 import { parseReason } from '../../../../utils/reasonIcons';
+import { cards as baseCards } from '@/data/cards';
 
-
-// カード名定義
-const cardTitles = [
-  "ジョーズ",
-  "アミティ・ボードウォーク・ゲーム",
-  "ウォーターワールド",
-  "ザ・ドラゴン・パール",
-  "ロンバーズ・ランディング",
-  "ロストワールド・レストラン",
-  "ジュラシック・パーク・ダイナソー・ミート&グリート",
-  "ザ・フライング・ダイナソー",
-  "名探偵コナン 4-D ライブ・ショー ~星空の宝石(ジュエル)~",
-  "クロミ・ライブ",
-  "パークサイド・グリル",
-  "SAIDO",
-  "デリシャス・ミー！ザ・クッキー・キッチン",
-  "スペース・キラー",
-  "ミニオン・ハチャメチャ・アイス",
-  "ミニオン・ハチャメチャ・ライド",
-  "マリオカート ~クッパの挑戦状~",
-  "ヨッシー・アドベンチャー",
-  "キノピオカフェ",
-  "ピットストップ・ポップコーン",
-  "三本の箒",
-  "オリバンダーの店",
-  "ハリー・ポッター・アンド・ザ・フォービドゥン・ジャーニー",
-  "フライト・オブ・ザ・ヒッポグリフ",
-  "ハリウッド・ドリーム・ザ・ライド",
-  "プレイング・ウィズおさるのジョージ",
-  "シング・オン・ツアー",
-  "スタジオ・スターズ・レストラン",
-  "ビバリーヒルズ・ブランジェリー",
-  "ハローキティのコーナーカフェ",
-  "スヌーピー・バックロット・カフェ",
-  "ハローキティのリボン・コレクション",
-  "エルモのゴーゴー・スケートボード",
-  "エルモのバブル・バブル",
-  "エルモのリトル・ドライブ",
-  "ハローキティのカップケーキ・ドリーム",
-  "ビッグバードのビッグトップ・サーカス",
-  "フライング・スヌーピー",
-  "モッピーのバルーン・トリップ",
-];
-
-// カード定義（play3 と揃える）
-const allCards = Array.from({ length: 10 }, (_, i) => {
-  const idx = i + 1;
-  return {
-    id: `card${idx}`,
-    title: cardTitles[i],
-    src: `/pngs/USJ_${idx}_surface-1.png`,
-  };
-});
+// カード定義（全39枚・共通データから生成）
+const allCards = baseCards.map((c) => ({
+  id: `card${c.id}`,
+  title: c.title,
+  src: c.frontSrc,
+}));
 
 type FinalSelectionDoc = {
   userId: string;
@@ -305,7 +259,7 @@ export default function ResultPage() {
 
   // 全カード一覧のため、全カードに対する最終カテゴリを決定
   const allCardsWithFinalCategory = useMemo(() => {
-    const ALL_CARDS = Array.from({ length: 10 }, (_, i) => `card${i + 1}`);
+    const ALL_CARDS = baseCards.map((c) => `card${c.id}`);
     return ALL_CARDS.map(cardId => {
       let finalCategory = 'unassigned';
       if (goIds.includes(cardId)) finalCategory = 'go';

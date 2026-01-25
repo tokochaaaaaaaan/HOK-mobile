@@ -69,10 +69,6 @@ export default function MatchResultPage() {
   const [detailModal, setDetailModal] = useState<{ open: boolean; userId: string; userName: string }>({ open: false, userId: '', userName: '' });
   const [detailSelectedOtherUserId, setDetailSelectedOtherUserId] = useState<string>('');
 
-  // タイマー用
-  const [secondsLeft, setSecondsLeft] = useState<number>(60);
-  const timerStartedRef = useRef<number | null>(null);
-
   // 計算→保存の順序を保証するためのバージョン
   const [calcVersion, setCalcVersion] = useState(0);
   const lastWrittenVersionRef = useRef<number>(-1);
@@ -598,36 +594,8 @@ export default function MatchResultPage() {
   useEffect(() => {
     if (phase === 'reveal') {
       console.log('Match result: Starting reveal phase');
-
-      // reveal フェーズで タイマーを開始（1分間のカウントダウン）
-      if (!timerStartedRef.current) {
-        timerStartedRef.current = Date.now();
-        setSecondsLeft(60);
-      }
     }
   }, [phase, router, roomId]);
-
-  // 1分経過で強制的に play3 へ遷移
-  useEffect(() => {
-    if (phase !== 'reveal') return;
-    
-    const interval = setInterval(() => {
-      if (timerStartedRef.current) {
-        const elapsed = Math.floor((Date.now() - timerStartedRef.current) / 1000);
-        const remaining = Math.max(0, 60 - elapsed);
-        setSecondsLeft(remaining);
-        
-        // 60秒経過で遷移
-        if (remaining <= 0) {
-          clearInterval(interval);
-          console.log('Match result: 1 minute elapsed, transitioning to play3');
-          router.push(`/room/${roomId}/play3`);
-        }
-      }
-    }, 100);
-    
-    return () => clearInterval(interval);
-  }, [phase, roomId, router]);
 
   // 詳細モーダルを開いたら、最初の比較対象（他参加者）を自動選択
   useEffect(() => {
@@ -677,26 +645,6 @@ export default function MatchResultPage() {
         <div style={{ position: 'absolute', bottom: -160, right: -160, width: '70vmax', height: '70vmax', borderRadius: '50%', background: 'radial-gradient(circle, rgba(251,191,36,0.18), rgba(236,72,153,0.10), transparent 70%)', filter: 'blur(35px)' }} />
       </div>
 
-      {/* 右上のタイマー表示（フルスクリーンの外側） */}
-      {phase === 'reveal' && (
-        <div style={{
-          position: 'fixed',
-          top: 20,
-          right: 20,
-          background: 'rgba(0, 0, 0, 0.6)',
-          color: '#fff',
-          padding: '12px 20px',
-          borderRadius: 12,
-          fontWeight: 900,
-          fontSize: 18,
-          backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-          zIndex: 200
-        }}>
-          {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}秒後にplay3へ
-        </div>
-      )}
-
       <div style={{ color: '#fff', textAlign: 'center', position: 'relative', zIndex: 40, padding: '0 16px' }}>
         {phase === 'waiting' && (
           <div style={{ fontSize: '56px', marginBottom: '16px', animation: 'fadeInUp 0.8s ease-out both' }}>⏳</div>
@@ -743,18 +691,23 @@ export default function MatchResultPage() {
               <div style={{ display: 'grid', gridTemplateColumns: participantSummaries.length === 2 ? '1fr 1fr' : '1fr 1fr', gridAutoRows: '1fr', gap: 16 }}>
                 {participantSummaries.map((p, idx) => {
                   // 最大＋（気が合う）と最大−（気が合わない）を抽出
-                  const bestPlus = p.pairs.reduce<null | typeof p.pairs[number]>((acc, cur) => {
-                    if (!acc) return cur;
-                    if (cur.plusCount > acc.plusCount) return cur;
-                    if (cur.plusCount === acc.plusCount && cur.minusCount < acc.minusCount) return cur;
-                    return acc;
-                  }, null);
-                  const worstMinus = p.pairs.reduce<null | typeof p.pairs[number]>((acc, cur) => {
-                    if (!acc) return cur;
-                    if (cur.minusCount > acc.minusCount) return cur;
-                    if (cur.minusCount === acc.minusCount && cur.plusCount < acc.plusCount) return cur;
-                    return acc;
-                  }, null);
+                  const maxPlus = Math.max(0, ...p.pairs.map(x => x.plusCount || 0));
+                  const bestPlusPairs = maxPlus > 0
+                    ? p.pairs
+                        .filter(x => (x.plusCount || 0) === maxPlus)
+                        .slice()
+                        .sort((a, b) => (a.otherUserName || '').localeCompare(b.otherUserName || '', 'ja'))
+                    : [];
+                  const bestPlusNames = bestPlusPairs.map(x => x.otherUserName).filter(Boolean).join('・');
+
+                  const maxMinus = Math.max(0, ...p.pairs.map(x => x.minusCount || 0));
+                  const worstMinusPairs = maxMinus > 0
+                    ? p.pairs
+                        .filter(x => (x.minusCount || 0) === maxMinus)
+                        .slice()
+                        .sort((a, b) => (a.otherUserName || '').localeCompare(b.otherUserName || '', 'ja'))
+                    : [];
+                  const worstMinusNames = worstMinusPairs.map(x => x.otherUserName).filter(Boolean).join('・');
 
                   return (
                     <div key={p.userId} style={{ position: 'relative', border: '2px solid rgba(0,0,0,0.15)', borderRadius: 20, padding: '16px 14px', background: '#fff', minHeight: 200 }}>
@@ -786,8 +739,8 @@ export default function MatchResultPage() {
                           <div style={{ fontSize: 13, fontWeight: 800, color: '#10b981' }}>合致数</div>
                           <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 900, color: '#10b981' }}>＋</div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: '#1f2937' }}>：</div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: '#1f2937', flex: 1 }}>{bestPlus?.otherUserName ?? 'ユーザなし'}</div>
-                          <div style={{ fontSize: 14, fontWeight: 900, color: '#10b981' }}>＋{bestPlus?.plusCount ?? 0}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#1f2937', flex: 1 }}>{bestPlusNames || 'ユーザなし'}</div>
+                          <div style={{ fontSize: 14, fontWeight: 900, color: '#10b981' }}>＋{maxPlus || 0}</div>
                         </div>
                       </div>
 
@@ -797,8 +750,8 @@ export default function MatchResultPage() {
                           <div style={{ fontSize: 13, fontWeight: 800, color: '#9333ea' }}>合致数</div>
                           <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #9333ea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 900, color: '#9333ea' }}>－</div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: '#1f2937' }}>：</div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: '#1f2937', flex: 1 }}>{worstMinus?.otherUserName ?? 'ユーザなし'}</div>
-                          <div style={{ fontSize: 14, fontWeight: 900, color: '#9333ea' }}>－{worstMinus?.minusCount ?? 0}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#1f2937', flex: 1 }}>{worstMinusNames || 'ユーザなし'}</div>
+                          <div style={{ fontSize: 14, fontWeight: 900, color: '#9333ea' }}>－{maxMinus || 0}</div>
                         </div>
                       </div>
 

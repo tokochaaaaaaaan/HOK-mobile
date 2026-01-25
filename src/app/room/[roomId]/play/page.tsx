@@ -246,7 +246,7 @@ export default function PlayPage() {
   };
 
   // 初期カードプール（39枚）
-  const initialCards: PlayPageCard[] = Array.from({ length: 10 }, (_, i) => {
+  const initialCards: PlayPageCard[] = Array.from({ length: 39 }, (_, i) => {
     const idx = i + 1;
     return {
       id: `card${idx}`,

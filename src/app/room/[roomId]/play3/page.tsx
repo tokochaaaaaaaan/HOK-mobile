@@ -28,6 +28,7 @@ import MapButton from "@/components/MapButton";
 import NoteWindow from "../components/NoteWindow";
 import styles from "./page.module.css";
 import { parseReason } from "../../../../utils/reasonIcons";
+import { cards as baseCards } from "@/data/cards";
 
 const PLAY3_VOTE_SESSIONS = "play3VoteSessions";
 const PLAY3_VOTE_RESULTS = "play3VoteResults";
@@ -107,30 +108,14 @@ export default function Play3Page() {
   // Scale機能を削除して、常に画面全体を使用
 
   // カード定義（39枚）
-  const cardTitles = [
-    "ジョーズ",
-    "アミティ・ボードウォーク・ゲーム",
-    "ウォーターワールド",
-    "ザ・ドラゴン・パール",
-    "ロンバーズ・ランディング",
-    "ロストワールド・レストラン",
-    "ジュラシック・パーク・ダイナソー・ミート&グリート",
-    "ザ・フライング・ダイナソー",
-    "名探偵コナン 4-D ライブ・ショー ~星空の宝石(ジュエル)~",
-    "クロミ・ライブ",
-  ];
-
   const ALL_CARDS = useMemo(
     () =>
-      Array.from({ length: 10 }, (_, i) => {
-        const idx = i + 1;
-        return {
-          id: `card${idx}`,
-          title: cardTitles[i],
-          src: `/pngs/USJ_${idx}_surface-1.png`,
-          backSrc: `/pngs/back/USJ_${idx}_back-1.png`,
-        };
-      }),
+      baseCards.map((c) => ({
+        id: `card${c.id}`,
+        title: c.title,
+        src: c.frontSrc,
+        backSrc: c.backSrc,
+      })),
     []
   );
 
