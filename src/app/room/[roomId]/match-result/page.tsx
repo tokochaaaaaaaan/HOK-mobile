@@ -35,10 +35,6 @@ export default function MatchResultPage() {
 
   console.log('MatchResultPage initialized with:', { roomId, params });
 
-  // Audio refs
-  const drumrollRef = useRef<HTMLAudioElement>(null);
-  const banRef = useRef<HTMLAudioElement>(null);
-
   // 演出フェーズ: 集計(waiting) -> アナウンス(announce) -> ドラムロール(drumroll) -> リビール(reveal)
   type Phase = 'waiting' | 'announce' | 'drumroll' | 'reveal';
   const [phase, setPhase] = useState<Phase>('waiting');
@@ -48,6 +44,8 @@ export default function MatchResultPage() {
   // Data states
   const [userSelections, setUserSelections] = useState<UserSelection[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [roomParticipantCount, setRoomParticipantCount] = useState<number>(0);
+  const participantNameByIdRef = useRef<Map<string, string>>(new Map());
   type PairDetail = {
     otherUserId: string;
     otherUserName: string;
@@ -66,11 +64,43 @@ export default function MatchResultPage() {
     minusSum: number;
   };
   const [participantSummaries, setParticipantSummaries] = useState<ParticipantSummary[]>([]);
-  
-  // カード詳細モーダル用
-  const [detailModal, setDetailModal] = useState<{ show: boolean; userA: string; userB: string; pair: PairDetail | null }>({ show: false, userA: '', userB: '', pair: null });
+
+  // 詳細表示（参加者ごとの「vs全員」）: モーダル
+  const [detailModal, setDetailModal] = useState<{ open: boolean; userId: string; userName: string }>({ open: false, userId: '', userName: '' });
+  const [detailSelectedOtherUserId, setDetailSelectedOtherUserId] = useState<string>('');
+
+  // タイマー用
+  const [secondsLeft, setSecondsLeft] = useState<number>(60);
+  const timerStartedRef = useRef<number | null>(null);
+
+  // 計算→保存の順序を保証するためのバージョン
+  const [calcVersion, setCalcVersion] = useState(0);
+  const lastWrittenVersionRef = useRef<number>(-1);
 
   // ========== Data Subscription ==========
+  // ルーム参加者数/表示名の購読（全員ready後に計算するため）
+  useEffect(() => {
+    if (!roomId || typeof roomId !== "string") return;
+
+    const roomRef = doc(db, "rooms", roomId);
+    const unsub = onSnapshot(roomRef, (snap) => {
+      const data: any = snap.data();
+      const parts = data?.participants || {};
+
+      const nameMap = new Map<string, string>();
+      Object.entries(parts).forEach(([id, v]: any) => {
+        if (typeof v === 'string') nameMap.set(String(id), v);
+        else if (v && typeof v === 'object' && typeof (v as any).name === 'string') nameMap.set(String(id), (v as any).name);
+      });
+      participantNameByIdRef.current = nameMap;
+
+      const count = Object.keys(parts).length;
+      setRoomParticipantCount(count);
+    });
+
+    return () => unsub();
+  }, [roomId]);
+
   useEffect(() => {
     console.log('Match result: useEffect triggered', { roomId, roomIdType: typeof roomId });
     if (!roomId || typeof roomId !== "string") {
@@ -118,10 +148,13 @@ export default function MatchResultPage() {
         try {
           // 統一フォーマット優先: categories フィールドを使用
           if (data.categories) {
+            const resolvedUserId = String(data.userId || data.user || data.userName || doc.id);
+            const resolvedUserName = participantNameByIdRef.current.get(resolvedUserId)
+              || String(data.userName || data.user || data.userId || doc.id);
             list.push({
-              user: data.user || data.userId || data.userName || doc.id,
-              userId: data.userId || data.user || data.userName || doc.id,
-              userName: data.userName || data.user || data.userId || doc.id,
+              user: String(data.user || data.userId || data.userName || doc.id),
+              userId: resolvedUserId,
+              userName: resolvedUserName,
               planName: data.planName || data.planname || "",
               categories: data.categories,
             });
@@ -139,20 +172,26 @@ export default function MatchResultPage() {
               ),
             };
             
+            const resolvedUserId = String(data.userId || data.user || doc.id);
+            const resolvedUserName = participantNameByIdRef.current.get(resolvedUserId)
+              || String(data.userName || data.user || doc.id);
             list.push({
-              user: data.user || data.userId || doc.id,
-              userId: data.userId || data.user || doc.id,
-              userName: data.userName || data.user || doc.id,
+              user: String(data.user || data.userId || doc.id),
+              userId: resolvedUserId,
+              userName: resolvedUserName,
               planName: data.planName || data.planname || "",
               categories,
             });
           } else {
             // データ不足の場合は空のカテゴリで追加
             console.warn('Match result: No valid category data found for user:', doc.id);
+            const resolvedUserId = String(data.userId || data.user || doc.id);
+            const resolvedUserName = participantNameByIdRef.current.get(resolvedUserId)
+              || String(data.userName || data.user || doc.id);
             list.push({
-              user: data.user || data.userId || doc.id,
-              userId: data.userId || data.user || doc.id,
-              userName: data.userName || data.user || doc.id,
+              user: String(data.user || data.userId || doc.id),
+              userId: resolvedUserId,
+              userName: resolvedUserName,
               planName: data.planName || data.planname || "",
               categories: {
                 veryWant: [],
@@ -200,6 +239,15 @@ export default function MatchResultPage() {
     console.log('Match result: Sum-based agreement calculation triggered', { userSelectionsLength: userSelections.length, userSelections });
     if (userSelections.length === 0) {
       console.log('Match result: No user selections, skipping calculation');
+      return;
+    }
+
+    // 参加者数が取得できている場合は「全員分揃ってから」計算する
+    if (roomParticipantCount > 0 && userSelections.length < roomParticipantCount) {
+      console.log('Match result: Waiting for all participants to be ready before calculation', {
+        roomParticipantCount,
+        readySelections: userSelections.length,
+      });
       return;
     }
     // 最低限の参加者数チェック
@@ -261,14 +309,64 @@ export default function MatchResultPage() {
       cards.forEach(c => idToCard.set(c.id, { title: c.title, frontSrc: c.frontSrc }));
 
       // ユーザーごとの符号マップ（cardId -> -1 | 0 | +1）
+      const toNum = (arr: any[] | undefined) => (arr ?? [])
+        .map((x: any) => {
+          if (x == null) return Number.NaN;
+          if (typeof x === 'number') return x;
+          if (typeof x === 'string') return Number(x);
+          if (typeof x === 'object') {
+            if ('id' in x) return Number((x as any).id);
+            if ('cardId' in x) return Number((x as any).cardId);
+          }
+          return Number.NaN;
+        })
+        .filter((n: number) => Number.isFinite(n));
+
+      const normalizeCardIdToNumber = (v: any): number => {
+        if (v == null) return Number.NaN;
+        if (typeof v === 'number') return v;
+        if (typeof v === 'string') {
+          // waitingページ等の形式: "card1" -> 1
+          const m = v.match(/^card(\d+)$/i);
+          if (m) return Number(m[1]);
+          return Number(v);
+        }
+        if (typeof v === 'object') {
+          const id = (v as any).id ?? (v as any).cardId;
+          return normalizeCardIdToNumber(id);
+        }
+        return Number.NaN;
+      };
+
+      const toCardNums = (arr: any[] | undefined) => (arr ?? [])
+        .map(normalizeCardIdToNumber)
+        .filter((n: number) => Number.isFinite(n));
+
       const userSignMaps = uniqueSelections.map(sel => {
         const signMap = new Map<number, number>();
-        const toNum = (arr: Array<{id: string}>) => arr.map(x => Number(x.id)).filter(n => !Number.isNaN(n));
-        toNum(sel.categories.veryWant).forEach(id => signMap.set(id, +1));
-        toNum(sel.categories.want).forEach(id => signMap.set(id, +1));
-        toNum(sel.categories.neutral).forEach(id => signMap.set(id, 0));
-        toNum(sel.categories.dont).forEach(id => signMap.set(id, -1));
-        toNum(sel.categories.veryDont).forEach(id => signMap.set(id, -1));
+        
+        // 処理順序が重要：ニュートラルを最後に設定する（上書き防止）
+        toCardNums(sel.categories.veryWant as any).forEach(id => signMap.set(id, +1));
+        toCardNums(sel.categories.want as any).forEach(id => signMap.set(id, +1));
+        toCardNums(sel.categories.dont as any).forEach(id => signMap.set(id, -1));
+        toCardNums(sel.categories.veryDont as any).forEach(id => signMap.set(id, -1));
+        toCardNums(sel.categories.neutral as any).forEach(id => {
+          // ニュートラルは既に符号が設定されていない場合のみ設定（重複は避ける）
+          if (!signMap.has(id)) {
+            signMap.set(id, 0);
+          }
+        });
+        
+        console.log(`Match result: User ${sel.userName} signMap:`, {
+          veryWant: toCardNums(sel.categories.veryWant as any),
+          want: toCardNums(sel.categories.want as any),
+          neutral: toCardNums(sel.categories.neutral as any),
+          dont: toCardNums(sel.categories.dont as any),
+          veryDont: toCardNums(sel.categories.veryDont as any),
+          mapSize: signMap.size,
+          mapContent: Array.from(signMap.entries()).slice(0, 10)
+        });
+        
         return { userId: sel.userId, userName: sel.userName, signMap };
       });
 
@@ -311,6 +409,13 @@ export default function MatchResultPage() {
               }
             }
           }
+          
+          console.log(`Match result: Pair ${A.userName} vs ${B.userName}:`, {
+            plus,
+            minus,
+            matchedTitles,
+            unmatchedTitles
+          });
 
           // i側にペアを追加
           summaries[i].pairs.push({
@@ -342,55 +447,9 @@ export default function MatchResultPage() {
         }
       }
 
+      // まずは計算結果を確定（画面表示のためのstate更新）
       setParticipantSummaries(summaries);
-
-      // Firestoreへ各参加者の合計を保存
-      summaries.forEach(async (s) => {
-        try {
-          await setDoc(doc(db, "rooms", String(roomId), "matchAnalysis", s.userId), {
-            userId: s.userId,
-            userName: s.userName,
-            plusSum: s.plusSum,
-            minusSum: s.minusSum,
-            computedAt: serverTimestamp(),
-          }, { merge: true });
-        } catch (e) {
-          console.error('Match result: Failed to write matchAnalysis', e);
-        }
-      });
-
-      // Firestoreへペアごとの詳細を保存
-      const pairPromises: Promise<void>[] = [];
-      for (let i = 0; i < userSignMaps.length; i++) {
-        for (let j = i + 1; j < userSignMaps.length; j++) {
-          const A = userSignMaps[i];
-          const B = userSignMaps[j];
-          const pairData = summaries[i].pairs.find(p => p.otherUserId === B.userId);
-          
-          if (pairData) {
-            const promise = (async () => {
-              try {
-                const pairDocId = [A.userId, B.userId].sort().join('_');
-                await setDoc(doc(db, "rooms", String(roomId), "matchAnalysisPairs", pairDocId), {
-                  userAId: A.userId,
-                  userAName: A.userName,
-                  userBId: B.userId,
-                  userBName: B.userName,
-                  plusCount: pairData.plusCount,
-                  minusCount: pairData.minusCount,
-                  computedAt: serverTimestamp(),
-                }, { merge: true });
-              } catch (e) {
-                console.error('Match result: Failed to write matchAnalysisPairs', e);
-              }
-            })();
-            pairPromises.push(promise);
-          }
-        }
-      }
-      
-      await Promise.all(pairPromises);
-
+      setCalcVersion(v => v + 1);
       setAgreementReady(true);
       } catch (error) {
         console.error('Match result: Error in sum-based calculation:', error);
@@ -398,7 +457,115 @@ export default function MatchResultPage() {
         setAgreementReady(true);
       }
     })();
-  }, [userSelections]);
+  }, [roomParticipantCount, userSelections]);
+
+  // ========== Save Results (after calculation) ==========
+  useEffect(() => {
+    if (!roomId || typeof roomId !== 'string') return;
+    if (!agreementReady) return;
+    if (participantSummaries.length < 2) return;
+
+    // 全員分揃っている場合のみ保存
+    if (roomParticipantCount > 0 && participantSummaries.length < roomParticipantCount) return;
+
+    // 同じ計算結果を二重送信しない
+    if (lastWrittenVersionRef.current === calcVersion) return;
+    lastWrittenVersionRef.current = calcVersion;
+
+    (async () => {
+      try {
+        const summaries = participantSummaries;
+
+        await Promise.all(
+          summaries.map(async (s) => {
+            const bestPlus = s.pairs.reduce<null | PairDetail>((acc, cur) => {
+              if (!acc) return cur;
+              if (cur.plusCount > acc.plusCount) return cur;
+              if (cur.plusCount === acc.plusCount && cur.minusCount < acc.minusCount) return cur;
+              return acc;
+            }, null);
+
+            const worstMinus = s.pairs.reduce<null | PairDetail>((acc, cur) => {
+              if (!acc) return cur;
+              if (cur.minusCount > acc.minusCount) return cur;
+              if (cur.minusCount === acc.minusCount && cur.plusCount < acc.plusCount) return cur;
+              return acc;
+            }, null);
+
+            await setDoc(
+              doc(db, 'rooms', String(roomId), 'matchAnalysis', s.userId),
+              {
+                userId: s.userId,
+                userName: s.userName,
+                plusSum: s.plusSum,
+                minusSum: s.minusSum,
+                // 全ペア結果（他ユーザーごとの合致/不合致数）を送信
+                pairCounts: s.pairs.map(p => ({
+                  otherUserId: p.otherUserId,
+                  otherUserName: p.otherUserName,
+                  plusCount: p.plusCount,
+                  minusCount: p.minusCount,
+                })),
+                // 表示用の最大/最小（UIは引き続き“最大のみ表示”）
+                bestPlus: bestPlus
+                  ? {
+                      otherUserId: bestPlus.otherUserId,
+                      otherUserName: bestPlus.otherUserName,
+                      plusCount: bestPlus.plusCount,
+                      minusCount: bestPlus.minusCount,
+                    }
+                  : null,
+                worstMinus: worstMinus
+                  ? {
+                      otherUserId: worstMinus.otherUserId,
+                      otherUserName: worstMinus.otherUserName,
+                      plusCount: worstMinus.plusCount,
+                      minusCount: worstMinus.minusCount,
+                    }
+                  : null,
+                algorithm: 'sign-match-v2',
+                computedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+          })
+        );
+
+        const pairWrites: Promise<void>[] = [];
+        for (const s of summaries) {
+          for (const p of s.pairs) {
+            const aId = String(s.userId);
+            const bId = String(p.otherUserId);
+            const [leftId, rightId] = [aId, bId].sort();
+
+            // 同一ペアを二重に書かない（片側だけ採用）
+            if (aId !== leftId) continue;
+
+            const pairDocId = `${leftId}_${rightId}`;
+            pairWrites.push(
+              setDoc(
+                doc(db, 'rooms', String(roomId), 'matchAnalysisPairs', pairDocId),
+                {
+                  userAId: leftId,
+                  userAName: s.userName,
+                  userBId: rightId,
+                  userBName: p.otherUserName,
+                  plusCount: p.plusCount,
+                  minusCount: p.minusCount,
+                  computedAt: serverTimestamp(),
+                },
+                { merge: true }
+              )
+            );
+          }
+        }
+
+        await Promise.all(pairWrites);
+      } catch (e) {
+        console.error('Match result: Failed to persist analysis', e);
+      }
+    })();
+  }, [agreementReady, calcVersion, participantSummaries, roomId, roomParticipantCount]);
 
   // ========== Phase Transition Effects ==========
 
@@ -417,13 +584,6 @@ export default function MatchResultPage() {
   useEffect(() => {
     if (phase === 'drumroll') {
       console.log('Match result: Starting drumroll phase');
-      
-      if (drumrollRef.current) {
-        drumrollRef.current.currentTime = 0;
-        drumrollRef.current.play().catch(e => 
-          console.log('Match result: Could not play drumroll:', e)
-        );
-      }
 
       const t = setTimeout(() => {
         console.log('Match result: Setting phase to reveal');
@@ -438,16 +598,51 @@ export default function MatchResultPage() {
   useEffect(() => {
     if (phase === 'reveal') {
       console.log('Match result: Starting reveal phase');
-      
-      if (banRef.current) {
-        banRef.current.currentTime = 0;
-        banRef.current.play().catch(e => 
-          console.log('Match result: Could not play ban:', e)
-        );
+
+      // reveal フェーズで タイマーを開始（1分間のカウントダウン）
+      if (!timerStartedRef.current) {
+        timerStartedRef.current = Date.now();
+        setSecondsLeft(60);
       }
-      // 自動遷移なし
     }
   }, [phase, router, roomId]);
+
+  // 1分経過で強制的に play3 へ遷移
+  useEffect(() => {
+    if (phase !== 'reveal') return;
+    
+    const interval = setInterval(() => {
+      if (timerStartedRef.current) {
+        const elapsed = Math.floor((Date.now() - timerStartedRef.current) / 1000);
+        const remaining = Math.max(0, 60 - elapsed);
+        setSecondsLeft(remaining);
+        
+        // 60秒経過で遷移
+        if (remaining <= 0) {
+          clearInterval(interval);
+          console.log('Match result: 1 minute elapsed, transitioning to play3');
+          router.push(`/room/${roomId}/play3`);
+        }
+      }
+    }, 100);
+    
+    return () => clearInterval(interval);
+  }, [phase, roomId, router]);
+
+  // 詳細モーダルを開いたら、最初の比較対象（他参加者）を自動選択
+  useEffect(() => {
+    if (!detailModal.open) return;
+
+    const pairsSorted = (
+      participantSummaries.find(s => String(s.userId) === String(detailModal.userId))
+        ?.pairs
+        ?.slice()
+        .sort((a, b) => (a.otherUserName || '').localeCompare(b.otherUserName || '', 'ja'))
+    ) || [];
+
+    const firstOtherId = pairsSorted[0]?.otherUserId;
+    setDetailSelectedOtherUserId(firstOtherId ? String(firstOtherId) : '');
+  }, [detailModal.open, detailModal.userId, participantSummaries]);
 
   // ========== Render ==========
 
@@ -476,21 +671,31 @@ export default function MatchResultPage() {
         background: 'linear-gradient(135deg, #0f172a 0%, #0b102d 40%, #18092c 100%)',
       }}
     >
-      {/* Audio elements */}
-      <audio ref={drumrollRef} preload="auto">
-        <source src="/audio/drumroll.mp3" type="audio/mpeg" />
-      </audio>
-      <audio ref={banRef} preload="auto">
-        <source src="/audio/ban.mp3" type="audio/mpeg" />
-      </audio>
-
-
-
       {/* 背景の装飾グロー */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }}>
         <div style={{ position: 'absolute', top: -120, left: -120, width: '55vmax', height: '55vmax', borderRadius: '50%', background: 'radial-gradient(circle, rgba(99,102,241,0.18), rgba(14,165,233,0.08), transparent 70%)', filter: 'blur(30px)' }} />
         <div style={{ position: 'absolute', bottom: -160, right: -160, width: '70vmax', height: '70vmax', borderRadius: '50%', background: 'radial-gradient(circle, rgba(251,191,36,0.18), rgba(236,72,153,0.10), transparent 70%)', filter: 'blur(35px)' }} />
       </div>
+
+      {/* 右上のタイマー表示（フルスクリーンの外側） */}
+      {phase === 'reveal' && (
+        <div style={{
+          position: 'fixed',
+          top: 20,
+          right: 20,
+          background: 'rgba(0, 0, 0, 0.6)',
+          color: '#fff',
+          padding: '12px 20px',
+          borderRadius: 12,
+          fontWeight: 900,
+          fontSize: 18,
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          zIndex: 200
+        }}>
+          {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}秒後にplay3へ
+        </div>
+      )}
 
       <div style={{ color: '#fff', textAlign: 'center', position: 'relative', zIndex: 40, padding: '0 16px' }}>
         {phase === 'waiting' && (
@@ -551,56 +756,28 @@ export default function MatchResultPage() {
                     return acc;
                   }, null);
 
-                  // 他の参加者番号を取得（自分以外）
-                  const otherNumbers = participantSummaries
-                    .map((_, i) => i + 1)
-                    .filter(n => n !== idx + 1);
-
                   return (
                     <div key={p.userId} style={{ position: 'relative', border: '2px solid rgba(0,0,0,0.15)', borderRadius: 20, padding: '16px 14px', background: '#fff', minHeight: 200 }}>
                       {/* ヘッダー行：ユーザ名と他参加者番号 */}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                         <div style={{ fontSize: 15, fontWeight: 800, color: '#1f2937' }}>{p.userName}</div>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          {otherNumbers.map(n => {
-                            const targetUser = participantSummaries[n - 1];
-                            const pairData = p.pairs.find(pair => pair.otherUserId === targetUser?.userId);
-                            return (
-                              <div 
-                                key={n} 
-                                onClick={() => {
-                                  if (pairData) {
-                                    setDetailModal({ show: true, userA: p.userName, userB: targetUser.userName, pair: pairData });
-                                  }
-                                }}
-                                style={{ 
-                                  width: 24, 
-                                  height: 24, 
-                                  borderRadius: '50%', 
-                                  border: '2px solid #9ca3af', 
-                                  display: 'flex', 
-                                  alignItems: 'center', 
-                                  justifyContent: 'center', 
-                                  fontSize: 12, 
-                                  fontWeight: 700, 
-                                  color: '#6b7280',
-                                  cursor: 'pointer',
-                                  transition: 'all 0.2s'
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.backgroundColor = '#f3f4f6';
-                                  e.currentTarget.style.borderColor = '#4b5563';
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.backgroundColor = 'transparent';
-                                  e.currentTarget.style.borderColor = '#9ca3af';
-                                }}
-                              >
-                                {n}
-                              </div>
-                            );
-                          })}
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setDetailModal({ open: true, userId: p.userId, userName: p.userName })}
+                          style={{
+                            padding: '6px 10px',
+                            borderRadius: 10,
+                            border: '2px solid #111827',
+                            background: '#fff',
+                            color: '#111827',
+                            fontSize: 12,
+                            fontWeight: 900,
+                            cursor: 'pointer',
+                            lineHeight: 1,
+                          }}
+                        >
+                          詳細
+                        </button>
                       </div>
 
                       {/* 合致数（＋）ボックス */}
@@ -624,167 +801,11 @@ export default function MatchResultPage() {
                           <div style={{ fontSize: 14, fontWeight: 900, color: '#9333ea' }}>－{worstMinus?.minusCount ?? 0}</div>
                         </div>
                       </div>
+
                     </div>
                   );
                 })}
               </div>
-
-              {/* カード詳細モーダル */}
-              {detailModal.show && detailModal.pair && detailModal.userA && detailModal.userB && (
-                <div 
-                  style={{ 
-                    position: 'fixed', 
-                    inset: 0, 
-                    backgroundColor: 'rgba(0,0,0,0.7)', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    zIndex: 100,
-                    padding: 16
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDetailModal({ show: false, userA: '', userB: '', pair: null });
-                  }}
-                >
-                  <div 
-                    style={{ 
-                      background: '#fff', 
-                      borderRadius: 20, 
-                      padding: '20px', 
-                      maxWidth: 800, 
-                      width: '100%',
-                      maxHeight: '80vh',
-                      overflowY: 'auto'
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {/* ヘッダー */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-                      <div style={{ background: 'linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%)', padding: '12px 16px', borderRadius: 12, textAlign: 'center' }}>
-                        <div style={{ fontSize: 18, fontWeight: 900, color: '#065f46' }}>{detailModal.userB}：＋</div>
-                      </div>
-                      <div style={{ background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)', padding: '12px 16px', borderRadius: 12, textAlign: 'center' }}>
-                        <div style={{ fontSize: 18, fontWeight: 900, color: '#fff' }}>{detailModal.userB}：－</div>
-                      </div>
-                    </div>
-
-                    {/* カード一覧 */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
-                      {/* 合致カード（＋） */}
-                      {detailModal.pair.matchedIds.map((cardId, index) => {
-                        const card = cards.find(c => c.id === cardId);
-                        if (!card) return null;
-                        
-                        // このカードに対する両ユーザーの選択を取得
-                        const userASelection = userSelections.find(u => u.userName === detailModal.userA);
-                        const userBSelection = userSelections.find(u => u.userName === detailModal.userB);
-                        
-                        const getCategoryLabel = (cats: any, id: string) => {
-                          if (cats.veryWant?.some((x: any) => String(x.id) === String(id))) return '特に行きたい';
-                          if (cats.want?.some((x: any) => String(x.id) === String(id))) return '行きたい';
-                          if (cats.neutral?.some((x: any) => String(x.id) === String(id))) return 'どちらでもいい';
-                          if (cats.dont?.some((x: any) => String(x.id) === String(id))) return '行きたくない';
-                          if (cats.veryDont?.some((x: any) => String(x.id) === String(id))) return '特に行きたくない';
-                          return '';
-                        };
-                        
-                        const labelA = userASelection ? getCategoryLabel(userASelection.categories, String(cardId)) : '';
-                        const labelB = userBSelection ? getCategoryLabel(userBSelection.categories, String(cardId)) : '';
-                        
-                        const getColor = (label: string) => {
-                          if (label.includes('特に行きたい')) return { bg: '#fecaca', border: '#dc2626', text: '#7f1d1d' };
-                          if (label.includes('行きたい')) return { bg: '#fbcfe8', border: '#db2777', text: '#831843' };
-                          if (label.includes('どちらでもいい')) return { bg: '#e5e7eb', border: '#6b7280', text: '#1f2937' };
-                          if (label.includes('行きたくない')) return { bg: '#bfdbfe', border: '#2563eb', text: '#1e3a8a' };
-                          if (label.includes('特に行きたくない')) return { bg: '#99f6e4', border: '#0d9488', text: '#134e4a' };
-                          return { bg: '#f3f4f6', border: '#9ca3af', text: '#4b5563' };
-                        };
-                        
-                        return (
-                          <div key={`matched-${cardId}-${index}`} style={{ border: '2px solid #10b981', borderRadius: 12, padding: 10, background: '#f0fdf4' }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: '#065f46', marginBottom: 6 }}>{card.title}</div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              {labelA && (() => {
-                                const color = getColor(labelA);
-                                return (
-                                  <div style={{ background: color.bg, border: `1px solid ${color.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 10, fontWeight: 700, color: color.text }}>1・{labelA}</div>
-                                );
-                              })()}
-                              {labelB && (() => {
-                                const color = getColor(labelB);
-                                return (
-                                  <div style={{ background: color.bg, border: `1px solid ${color.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 10, fontWeight: 700, color: color.text }}>2・{labelB}</div>
-                                );
-                              })()}
-                            </div>
-                          </div>
-                        );
-                      })}
-                      
-                      {/* 不一致カード（－） */}
-                      {detailModal.pair.unmatchedIds.map((cardId, index) => {
-                        const card = cards.find(c => c.id === cardId);
-                        if (!card) return null;
-                        
-                        const userASelection = userSelections.find(u => u.userName === detailModal.userA);
-                        const userBSelection = userSelections.find(u => u.userName === detailModal.userB);
-                        
-                        const getCategoryLabel = (cats: any, id: string) => {
-                          if (cats.veryWant?.some((x: any) => String(x.id) === String(id))) return '特に行きたい';
-                          if (cats.want?.some((x: any) => String(x.id) === String(id))) return '行きたい';
-                          if (cats.neutral?.some((x: any) => String(x.id) === String(id))) return 'どちらでもいい';
-                          if (cats.dont?.some((x: any) => String(x.id) === String(id))) return '行きたくない';
-                          if (cats.veryDont?.some((x: any) => String(x.id) === String(id))) return '特に行きたくない';
-                          return '';
-                        };
-                        
-                        const labelA = userASelection ? getCategoryLabel(userASelection.categories, String(cardId)) : '';
-                        const labelB = userBSelection ? getCategoryLabel(userBSelection.categories, String(cardId)) : '';
-                        
-                        const getColor = (label: string) => {
-                          if (label.includes('特に行きたい')) return { bg: '#fecaca', border: '#dc2626', text: '#7f1d1d' };
-                          if (label.includes('行きたい')) return { bg: '#fbcfe8', border: '#db2777', text: '#831843' };
-                          if (label.includes('どちらでもいい')) return { bg: '#e5e7eb', border: '#6b7280', text: '#1f2937' };
-                          if (label.includes('行きたくない')) return { bg: '#bfdbfe', border: '#2563eb', text: '#1e3a8a' };
-                          if (label.includes('特に行きたくない')) return { bg: '#99f6e4', border: '#0d9488', text: '#134e4a' };
-                          return { bg: '#f3f4f6', border: '#9ca3af', text: '#4b5563' };
-                        };
-                        
-                        return (
-                          <div key={`unmatched-${cardId}-${index}`} style={{ border: '2px solid #9333ea', borderRadius: 12, padding: 10, background: '#faf5ff' }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: '#6b21a8', marginBottom: 6 }}>{card.title}</div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              {labelA && (() => {
-                                const color = getColor(labelA);
-                                return (
-                                  <div style={{ background: color.bg, border: `1px solid ${color.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 10, fontWeight: 700, color: color.text }}>1・{labelA}</div>
-                                );
-                              })()}
-                              {labelB && (() => {
-                                const color = getColor(labelB);
-                                return (
-                                  <div style={{ background: color.bg, border: `1px solid ${color.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 10, fontWeight: 700, color: color.text }}>2・{labelB}</div>
-                                );
-                              })()}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* 閉じるボタン */}
-                    <div style={{ marginTop: 20, textAlign: 'center' }}>
-                      <button
-                        onClick={() => setDetailModal({ show: false, userA: '', userB: '', pair: null })}
-                        style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#6b7280', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
-                      >
-                        閉じる
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {/* 下部ボタン */}
               <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
@@ -799,6 +820,196 @@ export default function MatchResultPage() {
           </div>
         )}
       </div>
+
+      {/* 詳細モーダル（新しいウィンドウとして表示・大きめ） */}
+      {detailModal.open && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 400,
+            padding: 20,
+          }}
+          onClick={() => setDetailModal({ open: false, userId: '', userName: '' })}
+        >
+          <div
+            style={{
+              width: 'min(98vw, 1280px)',
+              background: '#fff',
+              borderRadius: 22,
+              border: '2px solid #111827',
+              padding: 24,
+              maxHeight: '94vh',
+              overflowY: 'auto',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+              <div style={{ fontSize: 16, fontWeight: 900, color: '#111827' }}>
+                {detailModal.userName} と全員の比較
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailModal({ open: false, userId: '', userName: '' })}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 12,
+                  border: '2px solid #111827',
+                  background: '#fff',
+                  color: '#111827',
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  lineHeight: 1,
+                }}
+              >
+                閉じる
+              </button>
+            </div>
+
+            {(() => {
+              const pairsSorted = (
+                participantSummaries.find(s => String(s.userId) === String(detailModal.userId))
+                  ?.pairs
+                  ?.slice()
+                  .sort((a, b) => (a.otherUserName || '').localeCompare(b.otherUserName || '', 'ja'))
+              ) || [];
+
+              if (pairsSorted.length === 0) {
+                return <div style={{ fontSize: 12, color: '#111827', lineHeight: 1.45, opacity: 0.9 }}>—</div>;
+              }
+
+              const selectedPair =
+                pairsSorted.find(p => String(p.otherUserId) === String(detailSelectedOtherUserId)) || pairsSorted[0];
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {/* 他参加者と比較できるアイコン */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 12, fontWeight: 900, color: '#111827' }}>比較する相手：</div>
+                    {pairsSorted.map((pair) => {
+                      const active = String(pair.otherUserId) === String(detailSelectedOtherUserId);
+                      const label = (pair.otherUserName || '?').trim();
+                      const initial = label ? label.slice(0, 1) : '?';
+                      return (
+                        <button
+                          key={`pick-${detailModal.userId}-${pair.otherUserId}`}
+                          type="button"
+                          onClick={() => setDetailSelectedOtherUserId(String(pair.otherUserId))}
+                          title={label}
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 999,
+                            border: active ? '3px solid #111827' : '2px solid rgba(17,24,39,0.35)',
+                            background: active ? '#111827' : '#fff',
+                            color: active ? '#fff' : '#111827',
+                            fontWeight: 900,
+                            fontSize: 14,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            lineHeight: 1,
+                          }}
+                        >
+                          {initial}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* 選んだ相手の＋/−カード出力 */}
+                  <div
+                    style={{
+                      border: '2px solid #111827',
+                      borderRadius: 16,
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ flex: 1, fontSize: 14, fontWeight: 900, color: '#111827' }}>{selectedPair.otherUserName}</div>
+                      <div style={{ fontSize: 14, fontWeight: 900, color: '#10b981' }}>＋{selectedPair.plusCount}</div>
+                      <div style={{ fontSize: 14, fontWeight: 900, color: '#9333ea' }}>－{selectedPair.minusCount}</div>
+                    </div>
+
+                    <div style={{ fontSize: 12, fontWeight: 900, color: '#111827' }}>合致カード（＋）</div>
+                    {selectedPair.matchedIds && selectedPair.matchedIds.length > 0 ? (
+                      <div style={{ overflowX: 'auto', paddingBottom: 4 }}>
+                        <div style={{ display: 'flex', gap: 10, width: 'max-content' }}>
+                          {selectedPair.matchedIds.map((id) => {
+                            const c = cards.find(cc => cc.id === id);
+                            if (!c) return null;
+                            return (
+                              <div
+                                key={`plus-${detailModal.userId}-${selectedPair.otherUserId}-${id}`}
+                                style={{
+                                  width: 160,
+                                  flex: '0 0 auto',
+                                  border: '2px solid #111827',
+                                  borderRadius: 12,
+                                  overflow: 'hidden',
+                                  background: '#fff',
+                                }}
+                              >
+                                <img src={c.frontSrc} alt={c.title} style={{ width: '100%', height: 'auto', display: 'block' }} />
+                                <div style={{ padding: '8px 10px', fontSize: 12, fontWeight: 900, color: '#111827', lineHeight: 1.2 }}>
+                                  {c.title}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: '#111827', lineHeight: 1.45, opacity: 0.9 }}>—</div>
+                    )}
+
+                    <div style={{ fontSize: 12, fontWeight: 900, color: '#111827' }}>不一致カード（－）</div>
+                    {selectedPair.unmatchedIds && selectedPair.unmatchedIds.length > 0 ? (
+                      <div style={{ overflowX: 'auto', paddingBottom: 4 }}>
+                        <div style={{ display: 'flex', gap: 10, width: 'max-content' }}>
+                          {selectedPair.unmatchedIds.map((id) => {
+                            const c = cards.find(cc => cc.id === id);
+                            if (!c) return null;
+                            return (
+                              <div
+                                key={`minus-${detailModal.userId}-${selectedPair.otherUserId}-${id}`}
+                                style={{
+                                  width: 160,
+                                  flex: '0 0 auto',
+                                  border: '2px solid #111827',
+                                  borderRadius: 12,
+                                  overflow: 'hidden',
+                                  background: '#fff',
+                                }}
+                              >
+                                <img src={c.frontSrc} alt={c.title} style={{ width: '100%', height: 'auto', display: 'block' }} />
+                                <div style={{ padding: '8px 10px', fontSize: 12, fontWeight: 900, color: '#111827', lineHeight: 1.2 }}>
+                                  {c.title}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: '#111827', lineHeight: 1.45, opacity: 0.9 }}>—</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
