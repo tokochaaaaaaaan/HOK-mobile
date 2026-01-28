@@ -1469,11 +1469,11 @@ export default function Play3Page() {
           const noVotes = finalVotes.filter((v) => v === "no").length;
           const pendingVotes = finalVotes.filter((v) => v === "pending").length;
 
-          // 5) 結果判定（あなたのルールに合わせて調整OK）
-          let finalStatus: "go" | "no" | "vs" | "neutral" = "vs";
-          if (goVotes > noVotes) finalStatus = "go";
-          else if (noVotes > goVotes) finalStatus = "no";
-          else finalStatus = "vs";
+          // 5) 結果判定（全員一致のみ go/no。それ以外は必ずVS）
+          const totalVotes = expectedIds.length;
+          const isAllGo = goVotes === totalVotes && noVotes === 0 && pendingVotes === 0;
+          const isAllNo = noVotes === totalVotes && goVotes === 0 && pendingVotes === 0;
+          const finalStatus: "go" | "no" | "vs" | "neutral" = isAllGo ? "go" : isAllNo ? "no" : "vs";
 
           // 6) assignments / state / session を確定書き込み（終了時に roundCompleted を確定！）
           const assignmentRef = doc(db, "rooms", roomId, "play3Assignments", cardId);
@@ -3067,25 +3067,8 @@ export default function Play3Page() {
                           );
                         }
 
-                        // 投票中でない場合は「議論開始」ボタンを表示
-                        return (
-                          <button
-                            onClick={() => startVote(cid)}
-                            style={{
-                              padding: "12px 16px",
-                              borderRadius: 10,
-                              border: "none",
-                              background: "#059669",
-                              color: "#fff",
-                              fontWeight: 900,
-                              fontSize: 14,
-                              cursor: "pointer",
-                              transition: "all .12s ease",
-                            }}
-                          >
-                            議論開始
-                          </button>
-                        );
+                        // 投票中でない場合（小ウィンドウ）は「議論開始」UIを表示しない
+                        return null;
                       })()}
                     </div>
                   )}
