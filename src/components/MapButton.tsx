@@ -3,20 +3,27 @@
 import React, { useState } from "react";
 import styles from "./MapButton.module.css";
 
-export default function MapButton() {
+type MapButtonProps = {
+  variant?: "floating" | "inline";
+  showLabel?: boolean;
+};
+
+export default function MapButton({ variant = "floating", showLabel }: MapButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const shouldShowLabel = showLabel ?? variant === "floating";
+  const iconSize = variant === "inline" ? 24 : 28;
 
   return (
     <>
       {/* フローティングマップボタン */}
       <button
-        className={styles.floatingButton}
+        className={variant === "floating" ? styles.floatingButton : styles.inlineButton}
         onClick={() => setIsOpen(true)}
         aria-label="マップを表示"
       >
         <svg
-          width="28"
-          height="28"
+          width={iconSize}
+          height={iconSize}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -28,7 +35,7 @@ export default function MapButton() {
           <line x1="8" y1="2" x2="8" y2="18" />
           <line x1="16" y1="6" x2="16" y2="22" />
         </svg>
-        <span className={styles.buttonText}>マップ</span>
+        {shouldShowLabel && <span className={styles.buttonText}>マップ</span>}
       </button>
 
       {/* マップモーダル */}
@@ -60,7 +67,7 @@ export default function MapButton() {
                     placeholder.className = 'mapPlaceholder';
                     placeholder.style.cssText = `
                       width: 100%;
-                      height: 500px;
+                      height: min(420px, 55dvh);
                       display: flex;
                       align-items: center;
                       justify-content: center;

@@ -18,7 +18,7 @@ import { db } from "../../../../../lib/firebase";
 import { normalizeCategories } from "../../../../utils/normalizeCategories";
 import MapButton from "@/components/MapButton";
 import NoteWindow from "../components/NoteWindow";
-import { cards } from "@/data/cards";
+import { activeCards as cards } from "@/data/cards";
 import styles from "./page.module.css";
 
 type LogEntry = { id: string; user: string; card: string; polarity: number; category?: string };

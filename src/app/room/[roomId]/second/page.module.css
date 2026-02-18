@@ -3,6 +3,7 @@
   top: 0;
   left: 0;
   width: 100%;
+  min-height: 100dvh;
   height: 100%;
   background: #fff;
   display: flex;
@@ -10,16 +11,25 @@
   align-items: center;
   justify-content: center;
   z-index: 9999;
+  padding: 24px 16px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .overlayText {
-  font-size: 2rem;
+  font-size: clamp(1.25rem, 5vw, 2rem);
   font-weight: bold;
   color: #333;
-  margin-bottom: 2rem;
+  margin-bottom: 24px;
+  text-align: center;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .startBtn {
+  width: min(320px, 100%);
+  min-height: 44px;
   padding: 12px 24px;
   font-size: 1.25rem;
   background-color: #28a745;

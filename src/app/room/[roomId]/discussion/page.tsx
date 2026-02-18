@@ -7,7 +7,7 @@ import { usePreventBack } from "@/hooks/usePreventBack";
 import MapButton from "@/components/MapButton";
 import NoteWindow from "../components/NoteWindow";
 import styles from "../play/page.module.css";
-import { cards as allCards } from "@/data/cards";
+import { activeCards as allCards } from "@/data/cards";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
 

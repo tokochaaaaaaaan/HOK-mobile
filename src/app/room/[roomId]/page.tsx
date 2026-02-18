@@ -14,12 +14,13 @@ export default function RoomPage() {
   const router = useRouter();
   const { userName } = useUser();
 
+  const DEFAULT_MIN_STOPS = 6;
+
   // ブラウザの戻るボタンを無効化
   usePreventBack();
 
   const [roomData, setRoomData] = useState<any>(null);
-  const [minStops, setMinStops] = useState<number>(6);
-  const [startPhase, setStartPhase] = useState<"solo" | "discussion">("solo");
+  const [startPhase] = useState<"mobile">("mobile");
   const hasNavigatedRef = useRef(false);
 
   // ルーム情報のリアルタイム購読（ここで gameStarted も監視します）
@@ -109,15 +110,12 @@ export default function RoomPage() {
   const handleStartGame = async () => {
     const parts = roomData?.participants || {};
     const cnt = Object.keys(parts).length;
-    if (cnt < 2) {
-      alert("参加者がまだ揃っていません");
-      return;
-    }
+    if (cnt < 1) return;
     // Firestore にフラグを書き込む
     if (!roomId || typeof roomId !== 'string') return;
     const roomRef = doc(db, "rooms", roomId);
     await updateDoc(roomRef, addAuthKey({
-      minStops,
+      minStops: roomData?.minStops ?? DEFAULT_MIN_STOPS,
       startPhase,
       gameStarted: true,
     }));
@@ -129,25 +127,37 @@ export default function RoomPage() {
 
   const participantCount = Object.keys(roomData.participants || {}).length;
 
-  // 必要な「行きたい」カード枚数を計算（半分以上）
-  const requiredWantCards = Math.ceil(minStops / 2);
-
   return (
-    <>
+    <div
+      style={{
+        minHeight: "100dvh",
+        width: "100%",
+        backgroundColor: "#fff",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "flex-start",
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 72px)",
+        paddingLeft: "16px",
+        paddingRight: "16px",
+        paddingBottom: "24px",
+        boxSizing: "border-box",
+      }}
+    >
       {/* 全画面左上の戻るボタン */}
       <button
         onClick={() => router.push('/')}
         style={{
           position: "fixed",
-          top: "16px",
-          left: "16px",
-          padding: "8px 16px",
+          top: "calc(env(safe-area-inset-top, 0px) + 12px)",
+          left: "calc(env(safe-area-inset-left, 0px) + 12px)",
+          padding: "10px 14px",
+          minHeight: "44px",
           backgroundColor: "#6c757d",
           color: "#fff",
           border: "none",
-          borderRadius: "6px",
+          borderRadius: "10px",
           cursor: "pointer",
-          fontSize: "0.9rem",
+          fontSize: "0.95rem",
           zIndex: 1000,
           boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
         }}
@@ -157,17 +167,15 @@ export default function RoomPage() {
 
       <div
         style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
           backgroundColor: "#fff",
-          padding: "32px",
+          padding: "24px",
           borderRadius: "12px",
           boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-          width: "360px",
+          width: "100%",
+          maxWidth: "420px",
           textAlign: "center",
           fontFamily: "Arial, sans-serif",
+          boxSizing: "border-box",
         }}
       >
         <h2 style={{ marginBottom: "8px" }}>ユーザ名: {userName}</h2>
@@ -191,51 +199,6 @@ export default function RoomPage() {
 
       {roomData.host === userName ? (
         <>
-          {/* 周遊数入力 */}
-          <div style={{ textAlign: "left", marginBottom: "16px" }}>
-            <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-              周遊数（最小訪問数）：
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={20}
-              value={minStops}
-              onChange={e => setMinStops(+e.target.value)}
-              style={{
-                width: "100%",
-                padding: "8px",
-                borderRadius: "4px",
-                border: "1px solid #ccc",
-                boxSizing: "border-box",
-                fontSize: "0.9rem",
-              }}
-            />
-          </div>
-
-          {/* フェーズ選択 */}
-          <div style={{ textAlign: "left", marginBottom: "24px" }}>
-            <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
-              どのフェーズから始めますか？
-            </label>
-            <select
-              value={startPhase}
-              onChange={e => setStartPhase(e.target.value as any)}
-              style={{
-                width: "100%",
-                padding: "8px",
-                fontSize: "0.9rem",
-                lineHeight: 1.4,
-                borderRadius: "4px",
-                border: "1px solid #ccc",
-                boxSizing: "border-box",
-              }}
-            >
-              <option value="solo">1人フェーズ（考えを整理する）</option>
-              <option value="discussion">話し合いフェーズ（議論から始める）</option>
-            </select>
-          </div>
-
           {/* ゲーム開始ボタン */}
           <button
             onClick={handleStartGame}
@@ -266,13 +229,13 @@ export default function RoomPage() {
           lineHeight: 1.5,
           fontWeight: 700,
         }}>
-          📍 ホストが目的地の<br />最低周遊数を決めています
+          📍 ホストがゲームを開始するのを待っています
           <div style={{ marginTop: "8px", fontSize: "0.9rem", color: "#0f172a", fontWeight: 700 }}>
             しばらくお待ちください...
           </div>
         </div>
       )}
       </div>
-    </>
+    </div>
   );
 }

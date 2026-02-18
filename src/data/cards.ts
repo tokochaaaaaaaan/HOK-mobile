@@ -5,6 +5,15 @@ export type CardData = {
   backSrc: string;   // 裏面
 };
 
+export const ACTIVE_CARD_IDS = [
+  1, 3, 4, 6, 8, 9, 10, 12, 13, 16, 17, 18, 19, 21, 23, 24, 25, 28, 29, 30,
+  31, 33, 36,
+] as const;
+
+const ACTIVE_CARD_ID_SET: ReadonlySet<number> = new Set<number>(ACTIVE_CARD_IDS);
+
+export const isActiveCardId = (id: number): boolean => ACTIVE_CARD_ID_SET.has(id);
+
 const cardTitles = [
   "ジョーズ",
   "アミティ・ボードウォーク・ゲーム",
@@ -56,3 +65,6 @@ export const cards: CardData[] = Array.from({ length: 39 }, (_, i) => {
     backSrc: `/pngs/back/USJ_${id}_back-1.png`,
   };
 });
+
+// 今後のゲームで使用するカード（選定済み）
+export const activeCards: CardData[] = cards.filter((c) => isActiveCardId(c.id));

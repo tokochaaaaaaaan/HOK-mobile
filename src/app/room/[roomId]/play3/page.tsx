@@ -28,7 +28,7 @@ import MapButton from "@/components/MapButton";
 import NoteWindow from "../components/NoteWindow";
 import styles from "./page.module.css";
 import { parseReason } from "../../../../utils/reasonIcons";
-import { cards as baseCards } from "@/data/cards";
+import { activeCards as baseCards } from "@/data/cards";
 
 const PLAY3_VOTE_SESSIONS = "play3VoteSessions";
 const PLAY3_VOTE_RESULTS = "play3VoteResults";
@@ -2089,6 +2089,46 @@ export default function Play3Page() {
           <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
               {renderAvatars()}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {(
+                  [
+                    { key: 'go', label: '行く', bg: '#fecaca', text: '#991b1b', border: '#fca5a5' },
+                    { key: 'no', label: '行かない', bg: '#dbeafe', text: '#1e40af', border: '#93c5fd' },
+                    { key: 'neutral', label: 'どちらでも', bg: '#e5e7eb', text: '#374151', border: '#d1d5db' },
+                    { key: 'vs', label: 'VS', bg: '#ffedd5', text: '#9a3412', border: '#fdba74' },
+                    { key: 'unassigned', label: '未分類', bg: '#f3f4f6', text: '#6b7280', border: '#d1d5db' },
+                  ] as const
+                ).map((c) => (
+                  <div
+                    key={c.key}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 10px',
+                      borderRadius: 9999,
+                      background: c.bg,
+                      color: c.text,
+                      border: `1px solid ${c.border}`,
+                      fontWeight: 900,
+                      fontSize: 12,
+                      lineHeight: 1,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 9999,
+                        background: c.text,
+                        display: 'inline-block',
+                      }}
+                      aria-hidden
+                    />
+                    {c.label}
+                  </div>
+                ))}
+              </div>
               {/* 合致率表示を削除 */}
             </div>
           </div>

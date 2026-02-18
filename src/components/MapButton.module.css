@@ -1,7 +1,7 @@
 /* フローティングボタン */
 .floatingButton {
   position: fixed;
-  bottom: 24px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
   right: 24px;
   width: 64px;
   height: 64px;
@@ -17,7 +17,33 @@
   justify-content: center;
   gap: 2px;
   transition: all 0.3s ease;
-  z-index: 999;
+  z-index: 1300;
+}
+
+/* インライン（固定配置しない） */
+.inlineButton {
+  width: var(--map-btn-size, 56px);
+  height: var(--map-btn-size, 56px);
+  border-radius: var(--map-btn-radius, 14px);
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  border: none;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.inlineButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(16, 185, 129, 0.45);
+  background: linear-gradient(135deg, #059669, #047857);
+}
+
+.inlineButton:active {
+  transform: scale(0.98);
 }
 
 .floatingButton:hover {
@@ -44,8 +70,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  padding: 16px;
+  z-index: 3000;
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px);
   animation: fadeIn 0.2s ease;
 }
 
@@ -63,7 +89,7 @@
   border-radius: 16px;
   width: 100%;
   max-width: 1200px;
-  max-height: 90vh;
+  max-height: 90dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -120,6 +146,7 @@
 
 .modalBody {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 24px;
   background: #f9fafb;
@@ -156,6 +183,28 @@
   }
 
   .modalBody {
-    padding: 16px;
+    padding: 12px;
+  }
+
+  /* 縦画面で「収まって見える」を優先 */
+  .modalContent {
+    max-height: 100dvh;
+    border-radius: 14px;
+  }
+
+  .modalHeader {
+    padding: 12px 14px;
+  }
+
+  .closeButton {
+    width: 34px;
+    height: 34px;
+    font-size: 1.25rem;
+  }
+
+  .mapImage {
+    width: 100%;
+    height: auto;
+    max-height: none;
   }
 }

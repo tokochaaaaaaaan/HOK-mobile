@@ -19,7 +19,7 @@ import { db } from "../../../../../lib/firebase";
 import MapButton from "@/components/MapButton";
 import NoteWindow from "../components/NoteWindow";
 import styles from "./page.module.css";
-import { cards as baseCards } from "@/data/cards";
+import { activeCards as baseCards } from "@/data/cards";
 
 // ============================================================
 // waiting/page.tsx – クリック移動＋理由モーダル＆確認ウィンドウ 完全版
@@ -348,8 +348,8 @@ export default function WaitingPage() {
       participantIds 
     });
     
-    // 最低2人以上で全員準備完了の場合にリダイレクト
-    if (totalCount >= 2 && readyCount === totalCount && readyCount > 0) {
+    // 1人でも全員準備完了の場合にリダイレクト
+    if (totalCount >= 1 && readyCount === totalCount && readyCount > 0) {
       console.log('All participants ready, redirecting to match-result...');
       // 少し遅延を入れてからリダイレクト（UIフィードバックのため）
       const timer = setTimeout(() => {

@@ -7,10 +7,8 @@ import { agreementOverall, convertSelectionsToMatrix } from '../../../../utils/a
 import { db } from '../../../../../lib/firebase';
 import { normalizeCategories } from '../../../../utils/normalizeCategories';
 import MapButton from '@/components/MapButton';
-import NoteWindow from '../components/NoteWindow';
 import { useUser } from '@/context/UserContext';
-import { parseReason } from '../../../../utils/reasonIcons';
-import { cards as baseCards } from '@/data/cards';
+import { activeCards as baseCards } from '@/data/cards';
 
 // カード定義（全39枚・共通データから生成）
 const allCards = baseCards.map((c) => ({
@@ -26,17 +24,15 @@ type FinalSelectionDoc = {
   categories: any;
 };
 
- type CatItem = { id: string; reason?: string };
+ type CatItem = { id: string };
  type UserSelection = {
    userId: string;
    userName: string;
    planName: string;
    categories: {
-     veryWant: CatItem[];
      want: CatItem[];
      neutral: CatItem[];
      dont: CatItem[];
-     veryDont: CatItem[];
    };
  };
 
@@ -58,21 +54,10 @@ type MatchAnalysisPairData = {
   computedAt?: any;
 };
 
-// 表示順
-const SECTION_ORDER: Array<{ key: string; label: string; color: string; border: string; collapsible: boolean }> = [
-  { key: 'go', label: '行く', color: '#fee2e2', border: '#fca5a5', collapsible: true },
-  { key: 'no', label: '行かない', color: '#1e3a8a', border: '#60a5fa', collapsible: true },
-  { key: 'veryWant', label: '特に行きたい', color: '#fecaca', border: '#fca5a5', collapsible: true },
-  { key: 'want', label: '行きたい', color: '#fce7f3', border: '#fbcfe8', collapsible: true },
-  { key: 'neutral', label: 'どちらでもいい', color: '#e5e7eb', border: '#d1d5db', collapsible: true },
-  { key: 'dont', label: '行きたくない', color: '#bae6fd', border: '#93c5fd', collapsible: true },
-  { key: 'veryDont', label: '特に行きたくない', color: '#93c5fd', border: '#60a5fa', collapsible: true },
-  { key: 'vs', label: '議論中（VS）', color: '#ffedd5', border: '#fdba74', collapsible: true },
-];
-
 export default function ResultPage() {
   const { roomId } = useParams();
   const { userName: currentUserName } = useUser();
+  const [isNarrowScreen, setIsNarrowScreen] = useState(false);
   const [selections, setSelections] = useState<UserSelection[]>([]);
   const [goIds, setGoIds] = useState<string[]>([]);
   const [noIds, setNoIds] = useState<string[]>([]);
@@ -88,6 +73,14 @@ export default function ResultPage() {
   const [expandedCard, setExpandedCard] = useState<{ id: string; flipped: boolean } | null>(null);
   const [matchAnalysis, setMatchAnalysis] = useState<MatchAnalysisData[]>([]);
   const [matchAnalysisPairs, setMatchAnalysisPairs] = useState<MatchAnalysisPairData[]>([]);
+
+  // スマホ幅判定
+  useEffect(() => {
+    const update = () => setIsNarrowScreen(window.innerWidth <= 420);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
 
   // モーダル開閉時にbodyのスクロールを制御
   useEffect(() => {
@@ -117,16 +110,16 @@ export default function ResultPage() {
         const data = d.data() as FinalSelectionDoc;
         const norm = normalizeCategories(data.categories || {});
         console.log('Final selection data:', data); // デバッグログ
+        const mergedWant = [...(norm.want || []), ...(norm.veryWant || [])];
+        const mergedDont = [...(norm.dont || []), ...(norm.veryDont || [])];
          list.push({
            userId: data.userId || d.id,
            userName: data.userName || data.userId || d.id,
            planName: data.planName || 'プラン名未設定',
            categories: {
-             veryWant: (norm.veryWant || []).map((c: any) => ({ id: c.id, reason: c.reason })),
-             want: (norm.want || []).map((c: any) => ({ id: c.id })),
+             want: mergedWant.map((c: any) => ({ id: c.id })),
              neutral: (norm.neutral || []).map((c: any) => ({ id: c.id })),
-             dont: (norm.dont || []).map((c: any) => ({ id: c.id })),
-             veryDont: (norm.veryDont || []).map((c: any) => ({ id: c.id, reason: c.reason })),
+             dont: mergedDont.map((c: any) => ({ id: c.id })),
            }
          });
       });
@@ -205,13 +198,13 @@ export default function ResultPage() {
 
   // カード→ユーザー選択逆引きマップ
   const cardChoiceMap = useMemo(() => {
-    type Entry = { userId: string; userName: string; planName: string; category: string; reason?: string };
+    type Entry = { userId: string; userName: string; planName: string; category: string };
     const map: Record<string, { users: Entry[] }> = {};
     selections.forEach(sel => {
       (Object.entries(sel.categories) as [string, CatItem[]][]).forEach(([cat, arr]) => {
         arr.forEach(item => {
           if (!map[item.id]) map[item.id] = { users: [] };
-          map[item.id].users.push({ userId: sel.userId, userName: sel.userName, planName: sel.planName, category: cat, reason: item.reason });
+          map[item.id].users.push({ userId: sel.userId, userName: sel.userName, planName: sel.planName, category: cat });
         });
       });
     });
@@ -239,7 +232,6 @@ export default function ResultPage() {
   }, [sectionCards]);
 
   const participantsSummary = useMemo(() => selections.map(s => s.userName).join('・'), [selections]);
-  const planSummaryList = useMemo(() => selections.map(s => ({ user: s.userName, plan: s.planName })), [selections]);
 
   // 参加者のカテゴリ別カード数を計算
   const participantStats = useMemo(() => {
@@ -248,11 +240,9 @@ export default function ResultPage() {
       userName: sel.userName,
       planName: sel.planName,
       counts: {
-        veryWant: sel.categories.veryWant.length,
         want: sel.categories.want.length,
         neutral: sel.categories.neutral.length,
         dont: sel.categories.dont.length,
-        veryDont: sel.categories.veryDont.length,
       }
     }));
   }, [selections]);
@@ -293,11 +283,11 @@ export default function ResultPage() {
       userId: s.userId,
       userName: s.userName,
       categories: {
-        veryWant: s.categories.veryWant,
         want: s.categories.want,
         neutral: s.categories.neutral,
         dont: s.categories.dont,
-        veryDont: s.categories.veryDont,
+        veryWant: [],
+        veryDont: [],
       }
     }));
     const matrix = convertSelectionsToMatrix(pseudo as any, 39);
@@ -306,11 +296,10 @@ export default function ResultPage() {
   }, [selections]);
 
   const categoryChipStyle: Record<string, { bg: string; text: string; border: string }> = {
-    veryWant: { bg: '#fecaca', text: '#7f1d1d', border: '#fca5a5' },
+    // veryWant: { bg: '#fecaca', text: '#7f1d1d', border: '#fca5a5' },
     want: { bg: '#fce7f3', text: '#9d174d', border: '#fbcfe8' },
     neutral: { bg: '#e5e7eb', text: '#374151', border: '#d1d5db' },
     dont: { bg: '#bae6fd', text: '#0c4a6e', border: '#93c5fd' },
-    veryDont: { bg: '#93c5fd', text: '#1e3a8a', border: '#60a5fa' },
     go: { bg: '#fecaca', text: '#991b1b', border: '#fca5a5' },      // 柔らかい赤
     no: { bg: '#dbeafe', text: '#1e40af', border: '#93c5fd' },      // 柔らかい青
     vs: { bg: '#ffedd5', text: '#9a3412', border: '#fdba74' },      // 柔らかい橙
@@ -318,11 +307,10 @@ export default function ResultPage() {
   };
 
   const categoryNames: Record<string, string> = {
-    veryWant: '特に行きたい',
+    // veryWant: '特に行きたい',
     want: '行きたい',
     neutral: 'どちらでもいい',
     dont: '行きたくない',
-    veryDont: '特に行きたくない',
     go: '行く',
     no: '行かない',
     vs: '議論中（VS）',
@@ -331,7 +319,7 @@ export default function ResultPage() {
 
   // アバター表示
   const renderAvatars = () => (
-    <div style={{ display: 'flex', gap: 8 }}>
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       {participantStats.map(p => {
         const isSelf = p.userName === currentUserName;
         return (
@@ -347,9 +335,13 @@ export default function ResultPage() {
     const info = getCardInfo(cardId);
     const users = cardChoiceMap[cardId]?.users || [];
     return (
-      <div key={cardId} style={{ width: 200, flex: '0 0 auto', border: '1px solid #e5e7eb', background: '#fff', borderRadius: 10, padding: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4 }} onClick={() => setCardModal(cardId)}>
+      <div
+        key={cardId}
+        style={{ width: isNarrowScreen ? 150 : 180, flex: '0 0 auto', border: '1px solid #e5e7eb', background: '#fff', borderRadius: 10, padding: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4 }}
+        onClick={() => setCardModal(cardId)}
+      >
         <div style={{ width: '100%', aspectRatio: '3/2', background: '#f8fafc', borderRadius: 10, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <img src={info?.src} alt="card" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          <img src={info?.src} alt="card" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
         </div>
         <div style={{ fontSize: 11, fontWeight: 700, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{info?.title}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 3 }}>
@@ -365,21 +357,21 @@ export default function ResultPage() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#ffffff', padding: '32px 16px', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ minHeight: '100dvh', background: '#ffffff', padding: `calc(env(safe-area-inset-top, 0px) + 20px) ${isNarrowScreen ? 10 : 12}px calc(env(safe-area-inset-bottom, 0px) + 20px)`, fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ maxWidth: 1180, margin: '0 auto' }}>
         {/* ヘッダー行 */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
           <button 
             onClick={() => setAllCardsModalOpen(true)}
             style={{ 
-              padding: '12px 24px', 
+              padding: isNarrowScreen ? '10px 16px' : '12px 24px', 
               background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
               border: 'none',
               borderRadius: 12, 
               fontWeight: 800, 
               color: '#fff', 
               cursor: 'pointer',
-              fontSize: 15,
+              fontSize: isNarrowScreen ? 14 : 15,
               boxShadow: '0 8px 20px rgba(37, 99, 235, 0.3)',
               transition: 'all 0.2s ease',
             }}
@@ -398,26 +390,9 @@ export default function ResultPage() {
         </div>
 
         <div style={{ marginBottom: 20, textAlign: 'center' }}>
-          <h1 style={{ fontSize: 32, fontWeight: 900, letterSpacing: '.5px', margin: 0, color: '#0f172a' }}>最終結果</h1>
+          <h1 style={{ fontSize: isNarrowScreen ? 24 : 32, fontWeight: 900, letterSpacing: '.5px', margin: 0, color: '#0f172a' }}>最終結果</h1>
           <div style={{ marginTop: 8, color: '#475569', fontSize: 14 }}>参加者: {participantsSummary || '—'}</div>
           {/* 合致率表示を削除 */}
-        </div>
-
-        {/* プラン一覧エリア */}
-        <div style={{ margin: '0 auto 32px', maxWidth: 900, background: 'linear-gradient(135deg,#f8fafc,#ffffff)', border: '1px solid #e2e8f0', borderRadius: 18, padding: '14px 18px', boxShadow: '0 6px 18px -8px rgba(15,23,42,0.15)' }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: '#334155', marginBottom: 6, letterSpacing: '.5px' }}>各ユーザーのプラン名</div>
-          {planSummaryList.length ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-              {planSummaryList.map((p, index) => (
-                <div key={`${p.user}-${index}`} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 9999, padding: '4px 14px', fontSize: 12, fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span>{p.user}</span>
-                  <span style={{ color: (p.plan && p.plan !== 'プラン名未設定') ? '#475569' : '#94a3b8' }}>
-                    {(p.plan && p.plan !== 'プラン名未設定') ? p.plan : '—'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : <div style={{ fontSize: 12, color: '#64748b' }}>データなし</div>}
         </div>
 
         {/* 合致度サマリーエリア */}
@@ -565,24 +540,15 @@ export default function ResultPage() {
       {activeUserInfo && (() => {
         const user = participantStats.find(p => p.userId === activeUserInfo);
         if (!user) return null;
-        const catOrder: Array<{key: keyof typeof user.counts; label: string}> = [
-          { key: 'veryWant', label: '特に行きたい' },
-          { key: 'want', label: '行きたい' },
-          { key: 'neutral', label: 'どちらでもいい' },
-          { key: 'dont', label: '行きたくない' },
-          { key: 'veryDont', label: '特に行きたくない' },
-        ];
+        const catOrder: Array<{key: keyof typeof user.counts; label: string}> = [{ key: 'want', label: '行きたい' }, { key: 'neutral', label: 'どちらでもいい' }, { key: 'dont', label: '行きたくない' }];
         const getList = (k: keyof typeof user.counts) => {
           const sel = selections.find(s => s.userId === user.userId);
           return sel ? sel.categories[k] : [];
         };
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={closeUserInfoModal}>
-            <div style={{ width: 420, background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }} onClick={e=>e.stopPropagation()}>
+            <div style={{ width: 'min(92vw, 420px)', maxHeight: '85dvh', overflowY: 'auto', background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }} onClick={e=>e.stopPropagation()}>
               <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>{user.userName}</div>
-              <div style={{ color: '#374151', marginBottom: 10 }}>プラン名：<strong style={{ color: '#2563eb' }}>
-                {(user.planName && user.planName !== 'プラン名未設定') ? user.planName : '—'}
-              </strong></div>
               <div style={{ display: 'grid', gap: 8 }}>
                 {catOrder.map(({key,label}) => {
                   const list = getList(key);
@@ -615,22 +581,22 @@ export default function ResultPage() {
       {allCardsModalOpen && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110 }} onClick={() => setAllCardsModalOpen(false)}>
           <div style={{ width: 'min(95vw, 1200px)', maxHeight: '90vh', background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 25px 80px rgba(0,0,0,0.35)' }} onClick={e=>e.stopPropagation()}>
-            <div style={{ padding: '24px 28px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(135deg, #f0f9ff, #f8fafc)' }}>
+            <div style={{ padding: isNarrowScreen ? '16px 16px' : '24px 28px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(135deg, #f0f9ff, #f8fafc)' }}>
               <div>
-                <div style={{ fontWeight: 900, fontSize: 24, color: '#0f172a', marginBottom: 4 }}>📋 全カード一覧</div>
-                <div style={{ fontSize: 13, color: '#64748b' }}>全{allCardsWithFinalCategory.length}枚のカード、最終決定カテゴリと選択状況</div>
+                <div style={{ fontWeight: 900, fontSize: isNarrowScreen ? 18 : 24, color: '#0f172a', marginBottom: 4 }}>📋 全カード一覧</div>
+                <div style={{ fontSize: isNarrowScreen ? 12 : 13, color: '#64748b' }}>全{allCardsWithFinalCategory.length}枚のカード、最終決定カテゴリと選択状況</div>
               </div>
               <button onClick={() => setAllCardsModalOpen(false)} style={{ padding: '8px 16px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontWeight: 700, color: '#374151', cursor: 'pointer' }}>閉じる</button>
             </div>
-            <div style={{ padding: 20, overflowY: 'auto', maxHeight: 'calc(90vh - 80px)' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+            <div style={{ padding: isNarrowScreen ? 14 : 20, overflowY: 'auto', maxHeight: 'calc(90vh - 80px)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: isNarrowScreen ? 'repeat(auto-fill, minmax(160px, 1fr))' : 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
                 {allCardsWithFinalCategory.map(({ cardId, finalCategory, users }) => {
                   const info = getCardInfo(cardId);
                   const finalStyle = categoryChipStyle[finalCategory] || categoryChipStyle.unassigned;
                   return (
                     <div key={cardId} style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
                       <div style={{ width: '100%', aspectRatio: '3/2', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <img src={info?.src} alt={info?.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <img src={info?.src} alt={info?.title} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                       </div>
                       <div style={{ padding: 10 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
@@ -642,7 +608,6 @@ export default function ResultPage() {
                         <div style={{ display: 'grid', gap: 4 }}>
                           {users.length > 0 ? users.map(u => {
                             const style = categoryChipStyle[u.category] || categoryChipStyle.neutral;
-                            const showReason = u.reason && (u.category === 'veryWant' || u.category === 'veryDont');
                             return (
                               <div key={u.userId} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 6 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3, gap: 4 }}>
@@ -651,11 +616,6 @@ export default function ResultPage() {
                                     {categoryNames[u.category]}
                                   </div>
                                 </div>
-                                {showReason && (
-                                  <div style={{ fontSize: 10, color: '#475569', lineHeight: 1.3 }}>
-                                    理由: {u.reason || '（なし）'}
-                                  </div>
-                                )}
                               </div>
                             );
                           }) : (
@@ -714,16 +674,9 @@ export default function ResultPage() {
               </div>
               <div style={{ padding: 20, overflowY: 'auto', maxHeight: 'calc(90vh - 100px)' }}>
                 {categoryList.length > 0 ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: isNarrowScreen ? 'repeat(auto-fill, minmax(160px, 1fr))' : 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
                     {categoryList.map((card, index) => {
                       const info = getCardInfo(card.id);
-                      const reason = (card as any).reason || '';
-                      const showReason = reason && (categoryDetailModal.category === 'veryWant' || categoryDetailModal.category === 'veryDont');
-                      
-                      // 理由を解析してアイコンとテキストを分離（ラベル非表示）
-                      const parsed = parseReason(reason);
-                      const displayEmoji = parsed.emoji || "";
-                      const displayText = parsed.text || "";
                       
                       return (
                         <div 
@@ -748,7 +701,7 @@ export default function ResultPage() {
                           }}
                         >
                           <div style={{ width: '100%', aspectRatio: '3/2', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <img src={info?.src} alt={info?.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img src={info?.src} alt={info?.title} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                           </div>
                           <div style={{ padding: 10 }}>
                             <div style={{ 
@@ -776,27 +729,6 @@ export default function ResultPage() {
                                 {categoryName}
                               </div>
                             </div>
-                            {showReason && (displayEmoji || displayText) && (
-                              <div style={{ 
-                                background: '#f9fafb', 
-                                border: '1px solid #e5e7eb', 
-                                borderRadius: 6, 
-                                padding: '6px 8px',
-                                marginTop: 6,
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 6
-                              }}>
-                                {displayEmoji && (
-                                  <span style={{ fontSize: 14, flexShrink: 0 }}>
-                                    {displayEmoji}
-                                  </span>
-                                )}
-                                <div style={{ fontSize: 11, color: '#374151', fontWeight: 600, lineHeight: 1.4, flex: 1 }}>
-                                  {displayText}
-                                </div>
-                              </div>
-                            )}
                           </div>
                         </div>
                       );
@@ -825,45 +757,21 @@ export default function ResultPage() {
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
             <div style={{ width: 'min(92vw,720px)', background: '#fff', borderRadius: 18, boxShadow: '0 30px 80px -20px rgba(15,23,42,.4)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', gap: 20, padding: 20, borderBottom: '1px solid #e5e7eb' }}>
-                <div style={{ flex: '0 0 240px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden' }}>
-                  <img src={info?.src} alt="card" style={{ width: '100%', height: 180, objectFit: 'cover' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: 16, borderBottom: '1px solid #e5e7eb' }}>
+                <div style={{ width: '100%', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden' }}>
+                  <img src={info?.src} alt="card" style={{ width: '100%', height: 220, objectFit: 'contain' }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 12, color: '#0f172a' }}>{info?.title}</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {users.map(u => {
                       const st = categoryChipStyle[u.category] || categoryChipStyle.neutral;
-                      const showReason = u.reason && (u.category === 'veryWant' || u.category === 'veryDont');
                       return (
                         <div key={u.userId} style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                             <div style={{ fontWeight: 800, color: '#0f172a' }}>{u.userName}</div>
                             <div style={{ background: st.bg, color: st.text, border: `1px solid ${st.border}`, borderRadius: 9999, padding: '2px 10px', fontSize: 12, fontWeight: 800 }}>{categoryNames[u.category] || u.category}</div>
                           </div>
-                          {showReason ? (() => {
-                            const parsed = parseReason(u.reason || '');
-                            const emoji = parsed.emoji || '';
-                            const text = parsed.text || '';
-                            if (!emoji && !text) return (
-                              <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, lineHeight: 1.4 }}>
-                                （理由なし）
-                              </div>
-                            );
-                            return (
-                              <div style={{ 
-                                display: 'flex', alignItems: 'center', gap: 6,
-                                fontSize: 12, color: '#334155', fontWeight: 600, lineHeight: 1.4 
-                              }}>
-                                {emoji && <span style={{ fontSize: 14 }}>{emoji}</span>}
-                                <span>{text}</span>
-                              </div>
-                            );
-                          })() : (
-                            <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, lineHeight: 1.4 }}>
-                              （理由なし / 特に系以外）
-                            </div>
-                          )}
                         </div>
                       );
                     })}
@@ -892,7 +800,7 @@ export default function ResultPage() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: 20,
+              padding: 12,
             }}
             onClick={() => setExpandedCard(null)}
           >
@@ -900,8 +808,8 @@ export default function ResultPage() {
               style={{
                 background: '#fff',
                 borderRadius: 16,
-                padding: 24,
-                maxWidth: 600,
+                padding: 20,
+                maxWidth: 520,
                 width: '100%',
                 boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
               }}
@@ -1033,8 +941,6 @@ export default function ResultPage() {
 
       <MapButton />
 
-      {/* ノートウィンドウ */}
-      <NoteWindow currentPage="result" />
     </div>
   );
 }

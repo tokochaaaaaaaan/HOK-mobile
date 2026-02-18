@@ -7,13 +7,15 @@ import {
   useState,
   useEffect,
   ReactNode,
+  Dispatch,
+  SetStateAction,
 } from "react";
 
 type UserContextType = {
   userName: string;
   setUserName: (name: string) => void;
   cardPositions: Record<string, string[]>;
-  setCardPositions: (pos: Record<string, string[]>) => void;
+  setCardPositions: Dispatch<SetStateAction<Record<string, string[]>>>;
 };
 
 const defaultPositions: Record<string, string[]> = {

@@ -11,8 +11,7 @@ import styles from "./page.module.css";
 export default function SecondPage() {
   const { roomId } = useParams();
   const router = useRouter();
-  const [minStops, setMinStops] = useState<number | null>(null);
-  const [startPhase, setStartPhase] = useState<"solo" | "discussion">("solo");
+  const [startPhase, setStartPhase] = useState<"mobile" | "solo" | "discussion">("mobile");
 
   // ブラウザの戻るボタンを無効化
   usePreventBack();
@@ -24,25 +23,20 @@ export default function SecondPage() {
       const snap = await getDoc(doc(db, "rooms", roomId));
       if (snap.exists()) {
         const data = snap.data();
-        setMinStops(data.minStops ?? null);
-        setStartPhase(data.startPhase ?? "solo");
+        setStartPhase(data.startPhase ?? "mobile");
       }
     })();
   }, [roomId]);
 
-  // 「開始する」ボタン - startPhaseに応じて遷移先を決定
+  // 「開始する」ボタン - mobile1に遷移
   const handleStart = () => {
-    if (startPhase === "discussion") {
-      router.push(`/room/${roomId}/discussion`);
-    } else {
-      router.push(`/room/${roomId}/play`);
-    }
+    router.push(`/room/${roomId}/mobile1`);
   };
 
   return (
     <div className={styles.fullscreenOverlay}>
       <div className={styles.overlayText}>
-        今回の旅行では最低でも{minStops ?? "..."}ヶ所周遊します
+        準備ができたら開始してください
       </div>
       <button className={styles.startBtn} onClick={handleStart}>
         開始する
