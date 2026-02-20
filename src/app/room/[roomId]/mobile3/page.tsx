@@ -21,6 +21,7 @@ import {
 
 type VoteChoice = "go" | "no" | "neutral";
 type AssignmentStatus = "go" | "no" | "neutral" | "vs";
+type AssignmentDoc = { status: AssignmentStatus; decidedBy?: string | null };
 
 type UiStage = "board" | "discussion" | "afterVote" | "discussionEnd";
 
@@ -74,7 +75,7 @@ export default function Mobile3Page() {
   const [participants, setParticipants] = useState<string[]>([]);
   const [state, setState] = useState<Mobile3State>({ phase: "voting", stage: "board", cardId: null, sessionId: null });
   const [votes, setVotes] = useState<Array<{ id: string; sessionId: string; cardId: string; userId: string; vote: VoteChoice }>>([]);
-  const [assignments, setAssignments] = useState<Record<string, AssignmentStatus>>({});
+  const [assignments, setAssignments] = useState<Record<string, AssignmentDoc>>({});
 
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
 
@@ -88,6 +89,9 @@ export default function Mobile3Page() {
   const [isBack, setIsBack] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+
+  // afterVoteの「閉じる」は各ユーザー（各端末）で完結させる
+  const [dismissedAfterVoteKey, setDismissedAfterVoteKey] = useState<string | null>(null);
 
   const [showSubmittedResults, setShowSubmittedResults] = useState(false);
   const [submittedSelections, setSubmittedSelections] = useState<
@@ -211,12 +215,15 @@ export default function Mobile3Page() {
     if (!roomId || typeof roomId !== "string") return;
     const qAssign = query(collection(db, "rooms", roomId, "play3Assignments"));
     const unsub = onSnapshot(qAssign, (snap) => {
-      const map: Record<string, AssignmentStatus> = {};
+      const map: Record<string, AssignmentDoc> = {};
       snap.docs.forEach((d) => {
         const data: any = d.data();
         const status = String(data?.status || "").trim();
         if (status === "go" || status === "no" || status === "neutral" || status === "vs") {
-          map[d.id] = status;
+          map[d.id] = {
+            status,
+            decidedBy: typeof data?.decidedBy === "string" ? String(data.decidedBy) : null,
+          };
         }
       });
       setAssignments(map);
@@ -353,7 +360,10 @@ export default function Mobile3Page() {
 
     const missing = cards
       .map((c) => c.cardId)
-      .filter((cid) => !(assignments[cid] === "go" || assignments[cid] === "no" || assignments[cid] === "neutral" || assignments[cid] === "vs"));
+      .filter((cid) => {
+        const st = assignments[cid]?.status;
+        return !(st === "go" || st === "no" || st === "neutral" || st === "vs");
+      });
     if (missing.length === 0) return;
 
     (async () => {
@@ -373,9 +383,56 @@ export default function Mobile3Page() {
     })().catch(() => {});
   }, [roomId, submittedSelections.length, cards, assignments, autoAssignments]);
 
+  // mobile2の全員提出から自動分類した結果を play3Assignments に同期する
+  // - 目的：行きたい×行きたくないのコンフリクトが起きたカードを「議論中(VS)」へ送る
+  // - ただし、mobile3で投票確定したカード（decidedBy === 'mobile3'）は上書きしない
+  useEffect(() => {
+    if (!roomId || typeof roomId !== "string") return;
+    if (submittedSelections.length === 0) return;
+
+    (async () => {
+      for (const c of cards) {
+        const desired: AssignmentStatus = (autoAssignments[c.cardId] || "neutral") as AssignmentStatus;
+        const cur = assignments[c.cardId];
+        const curStatus = cur?.status;
+        const decidedBy = typeof cur?.decidedBy === "string" ? cur.decidedBy : null;
+
+        if (decidedBy === "mobile3") continue;
+
+        // legacy/autoのものだけ同期（未設定も対象にする）
+        const isAuto = !decidedBy || decidedBy === "autoMobile2";
+        if (!isAuto) continue;
+
+        if (!curStatus || curStatus !== desired) {
+          await setDoc(
+            doc(db, "rooms", roomId, "play3Assignments", c.cardId),
+            addAuthKey({
+              status: desired,
+              decidedBy: "autoMobile2",
+              updatedAt: serverTimestamp(),
+            }),
+            { merge: true }
+          );
+        }
+      }
+    })().catch(() => {});
+  }, [roomId, submittedSelections.length, cards, assignments, autoAssignments]);
+
   const phase: "voting" | "finished" = state.phase === "finished" ? "finished" : "voting";
   const stage: UiStage =
     state.stage === "discussion" || state.stage === "afterVote" || state.stage === "discussionEnd" ? state.stage : "board";
+
+  const afterVoteKey = useMemo(() => {
+    if (phase !== "voting") return null;
+    if (stage !== "afterVote") return null;
+    if (!state.lastMove) return null;
+    const movedBy = typeof state.lastMove.movedBy === "string" ? state.lastMove.movedBy : "";
+    return `${state.lastMove.cardId}__${state.lastMove.status}__${movedBy}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, stage, state.lastMove?.cardId, state.lastMove?.status, state.lastMove?.movedBy]);
+
+  const canUseBoardControls =
+    stage === "board" || (stage === "afterVote" && !!afterVoteKey && dismissedAfterVoteKey === afterVoteKey);
 
   const currentCard = useMemo(() => {
     const cid = typeof state.cardId === "string" ? state.cardId : null;
@@ -466,7 +523,7 @@ export default function Mobile3Page() {
   const canFinish = useMemo(() => {
     if (cards.length === 0) return false;
     return cards.every((c) => {
-      const st = assignments[c.cardId];
+      const st = assignments[c.cardId]?.status;
       return st === "go" || st === "no" || st === "neutral";
     });
   }, [cards, assignments]);
@@ -553,6 +610,9 @@ export default function Mobile3Page() {
   const startDiscussion = async (cardId: string) => {
     if (!roomId || typeof roomId !== "string") return;
     if (phase !== "voting") return;
+    // 投票/議論中（小ウィンドウ含む）は新しい議論開始を禁止。
+    // afterVoteは「閉じる」を各自が押した後だけ許可。
+    if (!canUseBoardControls) return;
     const sessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const expected = (participants.length > 0 ? participants : normalizedUserName ? [normalizedUserName] : [])
       .map((v) => (typeof v === "string" ? v.trim() : ""))
@@ -635,7 +695,7 @@ export default function Mobile3Page() {
       unassigned: [],
     };
     for (const c of cards) {
-      const st = assignments[c.cardId] ?? autoAssignments[c.cardId] ?? "neutral";
+      const st = assignments[c.cardId]?.status ?? autoAssignments[c.cardId] ?? "neutral";
       (by[st] || by.unassigned).push(c);
     }
     return by;
@@ -661,7 +721,7 @@ export default function Mobile3Page() {
     setSelectedCardId(cardId);
   };
 
-  const canStartDiscussion = phase === "voting" && !!selectedCardId;
+  const canStartDiscussion = phase === "voting" && canUseBoardControls && !!selectedCardId;
 
   const vsCount = ((areaLists as any).vs as typeof cards)?.length ?? 0;
   const canOpenResult = true;
@@ -745,13 +805,24 @@ export default function Mobile3Page() {
           <div style={{ fontWeight: 900, fontSize: "1.25rem", color: "#0f172a" }}>議論していきましょう！</div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
             {orderedParticipants.length > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {orderedParticipants.slice(0, 4).map((name) => (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  overflowX: "auto",
+                  WebkitOverflowScrolling: "touch",
+                  maxWidth: "min(62vw, 320px)",
+                  paddingBottom: 2,
+                }}
+                aria-label="参加者（タップでmobile2の提出結果を見る）"
+              >
+                {orderedParticipants.map((name) => (
                   <button
                     key={`head-${name}`}
                     style={{
-                      width: 26,
-                      height: 26,
+                      width: 24,
+                      height: 24,
                       borderRadius: 9999,
                       border: "1px solid rgba(15,23,42,0.14)",
                       background: "#fff",
@@ -762,6 +833,7 @@ export default function Mobile3Page() {
                       color: "#0f172a",
                       boxShadow: "0 2px 10px rgba(15,23,42,0.10)",
                       cursor: "pointer",
+                      flex: "0 0 auto",
                     }}
                     title={name}
                     aria-label={`${name}のmobile2最終結果を見る`}
@@ -1291,7 +1363,7 @@ export default function Mobile3Page() {
       )}
 
       {/* 4ページ目：投票後 */}
-      {phase === "voting" && stage === "afterVote" && state.lastMove && (
+      {phase === "voting" && stage === "afterVote" && state.lastMove && afterVoteKey && dismissedAfterVoteKey !== afterVoteKey && (
         <div
           style={{
             position: "fixed",
@@ -1318,7 +1390,7 @@ export default function Mobile3Page() {
               {state.lastMove.title} は {statusLabel(state.lastMove.status)} に移動しました！
             </div>
             <button
-              onClick={() => endDiscussionAndReturnToBoard().catch(() => {})}
+              onClick={() => setDismissedAfterVoteKey(afterVoteKey)}
               style={{
                 width: "100%",
                 marginTop: 22,
@@ -1496,64 +1568,91 @@ export default function Mobile3Page() {
               {submittedSelections.length === 0 ? (
                 <div style={{ fontWeight: 900, color: "#64748b" }}>（まだ提出結果がありません）</div>
               ) : (
-                <div style={{ display: "grid", gap: 14 }}>
-                  {submittedSelections
-                    .filter((u) => (submittedActiveUser ? u.userName === submittedActiveUser : true))
-                    .map((u) => {
-                    const renderRow = (label: string, ids: string[], bg: string) => (
-                      <div style={{ borderRadius: 14, border: "1px solid rgba(15,23,42,0.12)", overflow: "hidden" }}>
-                        <div style={{ padding: "8px 10px", fontWeight: 900, background: bg, color: "#0f172a" }}>
-                          {label}（{ids.length}）
-                        </div>
-                        <div style={{ padding: 10 }}>
-                          {ids.length === 0 ? (
-                            <div style={{ fontWeight: 800, color: "#94a3b8", fontSize: 12 }}>(なし)</div>
-                          ) : (
-                            <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 6 }}>
-                              {ids.map((cid) => {
-                                const card = cards.find((c) => c.cardId === cid);
-                                if (!card) return null;
-                                return (
-                                  <div key={`${u.userName}-${label}-${cid}`} style={{ width: 72, flex: "0 0 auto" }}>
-                                    <div style={{ width: "100%", aspectRatio: "3/4", borderRadius: 10, overflow: "hidden", background: "#f1f5f9", border: "1px solid rgba(15,23,42,0.12)" }}>
-                                      <img src={card.frontSrc} alt={card.title} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} draggable={false} />
-                                    </div>
-                                    <div
-                                      style={{
-                                        marginTop: 6,
-                                        fontWeight: 900,
-                                        fontSize: 11,
-                                        color: "#0f172a",
-                                        lineHeight: 1.2,
-                                        overflow: "hidden",
-                                        display: "-webkit-box",
-                                        WebkitLineClamp: 2,
-                                        WebkitBoxOrient: "vertical" as any,
-                                      }}
-                                    >
-                                      {card.title}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
+                (() => {
+                  const filtered = submittedSelections.filter((u) =>
+                    submittedActiveUser ? u.userName === submittedActiveUser : true
+                  );
 
-                    return (
-                      <div key={`submitted-${u.userName}`} style={{ borderRadius: 16, border: "2px solid rgba(15,23,42,0.12)", padding: 12 }}>
-                        <div style={{ fontWeight: 900, color: "#0f172a", marginBottom: 10 }}>{u.userName}</div>
-                        <div style={{ display: "grid", gap: 10 }}>
-                          {renderRow("行きたい", u.want, "#dcfce7")}
-                          {renderRow("どちらでもいい", u.neutral, "#fffbeb")}
-                          {renderRow("行きたくない", u.dont, "#fee2e2")}
-                        </div>
+                  const renderRow = (u: { userName: string }, label: string, ids: string[], bg: string) => (
+                    <div style={{ borderRadius: 14, border: "1px solid rgba(15,23,42,0.12)", overflow: "hidden" }}>
+                      <div style={{ padding: "8px 10px", fontWeight: 900, background: bg, color: "#0f172a" }}>
+                        {label}（{ids.length}）
                       </div>
+                      <div style={{ padding: 10 }}>
+                        {ids.length === 0 ? (
+                          <div style={{ fontWeight: 800, color: "#94a3b8", fontSize: 12 }}>(なし)</div>
+                        ) : (
+                          <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 6 }}>
+                            {ids.map((cid) => {
+                              const card = cards.find((c) => c.cardId === cid);
+                              if (!card) return null;
+                              return (
+                                <div key={`${u.userName}-${label}-${cid}`} style={{ width: 72, flex: "0 0 auto" }}>
+                                  <div
+                                    style={{
+                                      width: "100%",
+                                      aspectRatio: "3/4",
+                                      borderRadius: 10,
+                                      overflow: "hidden",
+                                      background: "#f1f5f9",
+                                      border: "1px solid rgba(15,23,42,0.12)",
+                                    }}
+                                  >
+                                    <img
+                                      src={card.frontSrc}
+                                      alt={card.title}
+                                      style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
+                                      draggable={false}
+                                    />
+                                  </div>
+                                  <div
+                                    style={{
+                                      marginTop: 6,
+                                      fontWeight: 900,
+                                      fontSize: 11,
+                                      color: "#0f172a",
+                                      lineHeight: 1.2,
+                                      overflow: "hidden",
+                                      display: "-webkit-box",
+                                      WebkitLineClamp: 2,
+                                      WebkitBoxOrient: "vertical" as any,
+                                    }}
+                                  >
+                                    {card.title}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+
+                  if (submittedActiveUser && filtered.length === 0) {
+                    return (
+                      <div style={{ fontWeight: 900, color: "#64748b" }}>（{submittedActiveUser}の提出結果がありません）</div>
                     );
-                  })}
-                </div>
+                  }
+
+                  return (
+                    <div style={{ display: "grid", gap: 14 }}>
+                      {filtered.map((u) => (
+                        <div
+                          key={`submitted-${u.userName}`}
+                          style={{ borderRadius: 16, border: "2px solid rgba(15,23,42,0.12)", padding: 12 }}
+                        >
+                          <div style={{ fontWeight: 900, color: "#0f172a", marginBottom: 10 }}>{u.userName}</div>
+                          <div style={{ display: "grid", gap: 10 }}>
+                            {renderRow(u, "行きたい", u.want, "#dcfce7")}
+                            {renderRow(u, "どちらでもいい", u.neutral, "#fffbeb")}
+                            {renderRow(u, "行きたくない", u.dont, "#fee2e2")}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()
               )}
             </div>
           </div>

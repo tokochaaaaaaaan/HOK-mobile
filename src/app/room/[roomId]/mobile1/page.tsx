@@ -93,6 +93,37 @@ export default function Mobile1Page() {
   const current = remaining[0] ?? null;
   const lastAction = history.length ? history[history.length - 1].action : null;
 
+  // PC向け：矢印キーで振り分け（←行きたくない / ↓どちらでもいい / →行きたい）
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (!current) return;
+      if (isAnimatingOut) return;
+      if (outgoing) return;
+      if (showHistory || showCardList) return;
+
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable) return;
+
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        animateAndApply("dont");
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        animateAndApply("neutral");
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        animateAndApply("want");
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [current, isAnimatingOut, outgoing, showHistory, showCardList]);
+
   const setDelta = (nextDx: number, nextDy: number) => {
     dxRef.current = nextDx;
     dyRef.current = nextDy;
@@ -292,10 +323,11 @@ export default function Mobile1Page() {
         display: "flex",
         justifyContent: "center",
         alignItems: "flex-start",
-        paddingTop: "calc(env(safe-area-inset-top, 0px) + 72px)",
+        // 画面上部を詰めて縦スクロールを減らす（右上固定ボタン分だけ確保）
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 56px)",
         paddingLeft: "16px",
         paddingRight: "16px",
-        paddingBottom: "24px",
+        paddingBottom: "16px",
         boxSizing: "border-box",
       }}
     >
@@ -328,13 +360,16 @@ export default function Mobile1Page() {
       </button>
 
       <div style={{ width: "100%", maxWidth: "460px" }}>
+        <div style={{ fontWeight: 900, fontSize: 18, color: "#0f172a", textAlign: "center", marginBottom: 6 }}>
+          カードを振り分けて旅行計画を立てていこう！
+        </div>
         {/* カード領域 */}
         <div
           ref={stageRef}
           style={{
             width: "100%",
             aspectRatio: "3 / 4",
-            maxHeight: "72dvh",
+            maxHeight: "68dvh",
             borderRadius: "16px",
             boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
             backgroundColor: "#fff",
@@ -497,6 +532,63 @@ export default function Mobile1Page() {
           )}
         </div>
 
+        {/* スワイプ方向のヒント */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr 1fr",
+            gap: 8,
+            marginTop: 8,
+          }}
+          aria-label="スワイプ方向の説明"
+        >
+          <div
+            style={{
+              borderRadius: 12,
+              border: `1px solid ${actionMeta.dont.color}`,
+              background: actionMeta.dont.bg,
+              color: actionMeta.dont.color,
+              fontWeight: 900,
+              fontSize: 12,
+              padding: "8px 10px",
+              textAlign: "center",
+              whiteSpace: "nowrap",
+            }}
+          >
+            ← 行きたくない
+          </div>
+          <div
+            style={{
+              borderRadius: 12,
+              border: `1px solid ${actionMeta.neutral.color}`,
+              background: actionMeta.neutral.bg,
+              color: actionMeta.neutral.color,
+              fontWeight: 900,
+              fontSize: 12,
+              padding: "8px 10px",
+              textAlign: "center",
+              whiteSpace: "nowrap",
+            }}
+          >
+            ↓ どちらでもいい
+          </div>
+          <div
+            style={{
+              borderRadius: 12,
+              border: `1px solid ${actionMeta.want.color}`,
+              background: actionMeta.want.bg,
+              color: actionMeta.want.color,
+              fontWeight: 900,
+              fontSize: 12,
+              padding: "8px 10px",
+              textAlign: "center",
+              whiteSpace: "nowrap",
+            }}
+          >
+            → 行きたい
+          </div>
+        </div>
+
         {/* 操作ボタン（カードの下） */}
         <div
           style={{
@@ -504,7 +596,7 @@ export default function Mobile1Page() {
             gap: "10px",
             justifyContent: "space-between",
             alignItems: "center",
-            marginTop: "12px",
+            marginTop: "10px",
           }}
         >
           <button

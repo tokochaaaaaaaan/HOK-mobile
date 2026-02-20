@@ -319,11 +319,35 @@ export default function ResultPage() {
 
   // アバター表示
   const renderAvatars = () => (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+    <div
+      style={{
+        display: 'flex',
+        gap: 8,
+        flexWrap: isNarrowScreen ? 'nowrap' : 'wrap',
+        overflowX: isNarrowScreen ? 'auto' : 'visible',
+        paddingBottom: isNarrowScreen ? 4 : 0,
+        WebkitOverflowScrolling: 'touch',
+      }}
+    >
       {participantStats.map(p => {
         const isSelf = p.userName === currentUserName;
         return (
-          <button key={p.userId} onClick={() => setActiveUserInfo(p.userId)} title={p.userName} style={{ width: 32, height: 32, borderRadius: '50%', border: isSelf ? '2px solid #ef4444' : '1px solid #e5e7eb', background: '#fff', boxShadow: '0 2px 6px rgba(0,0,0,0.08)', fontWeight: 800, color: '#111827' }}>
+          <button
+            key={p.userId}
+            onClick={() => setActiveUserInfo(p.userId)}
+            title={p.userName}
+            style={{
+              width: isNarrowScreen ? 30 : 32,
+              height: isNarrowScreen ? 30 : 32,
+              borderRadius: '50%',
+              border: isSelf ? '2px solid #ef4444' : '1px solid #e5e7eb',
+              background: '#fff',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+              fontWeight: 800,
+              color: '#111827',
+              flex: '0 0 auto',
+            }}
+          >
             {p.userName?.[0] || '?'}
           </button>
         );
@@ -337,13 +361,29 @@ export default function ResultPage() {
     return (
       <div
         key={cardId}
-        style={{ width: isNarrowScreen ? 150 : 180, flex: '0 0 auto', border: '1px solid #e5e7eb', background: '#fff', borderRadius: 10, padding: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4 }}
+        style={{ width: isNarrowScreen ? '100%' : 180, flex: '0 0 auto', border: '1px solid #e5e7eb', background: '#fff', borderRadius: 10, padding: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4 }}
         onClick={() => setCardModal(cardId)}
       >
         <div style={{ width: '100%', aspectRatio: '3/2', background: '#f8fafc', borderRadius: 10, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <img src={info?.src} alt="card" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
         </div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{info?.title}</div>
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: '#111827',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            display: isNarrowScreen ? '-webkit-box' : 'block',
+            WebkitLineClamp: isNarrowScreen ? 2 : (undefined as any),
+            WebkitBoxOrient: isNarrowScreen ? ('vertical' as any) : (undefined as any),
+            whiteSpace: isNarrowScreen ? 'normal' : 'nowrap',
+            lineHeight: isNarrowScreen ? 1.2 : undefined,
+            minHeight: isNarrowScreen ? 28 : undefined,
+          }}
+        >
+          {info?.title}
+        </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 3 }}>
           {users.map(u => {
             const style = categoryChipStyle[u.category] || categoryChipStyle.neutral;
@@ -356,36 +396,64 @@ export default function ResultPage() {
     );
   };
 
+  const openGo = isNarrowScreen ? true : !!expanded.go;
+  const openNo = isNarrowScreen ? true : !!expanded.no;
+  const openNeutral = isNarrowScreen ? true : !!expanded.neutral;
+  const openVs = isNarrowScreen ? true : !!expanded.vs;
+
   return (
     <div style={{ minHeight: '100dvh', background: '#ffffff', padding: `calc(env(safe-area-inset-top, 0px) + 20px) ${isNarrowScreen ? 10 : 12}px calc(env(safe-area-inset-bottom, 0px) + 20px)`, fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ maxWidth: 1180, margin: '0 auto' }}>
         {/* ヘッダー行 */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-          <button 
-            onClick={() => setAllCardsModalOpen(true)}
-            style={{ 
-              padding: isNarrowScreen ? '10px 16px' : '12px 24px', 
-              background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
-              border: 'none',
-              borderRadius: 12, 
-              fontWeight: 800, 
-              color: '#fff', 
-              cursor: 'pointer',
-              fontSize: isNarrowScreen ? 14 : 15,
-              boxShadow: '0 8px 20px rgba(37, 99, 235, 0.3)',
-              transition: 'all 0.2s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = '0 12px 28px rgba(37, 99, 235, 0.4)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 8px 20px rgba(37, 99, 235, 0.3)';
-            }}
-          >
-            📋 全カード一覧
-          </button>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', width: isNarrowScreen ? '100%' : 'auto' }}>
+            <button 
+              onClick={() => setAllCardsModalOpen(true)}
+              style={{ 
+                padding: isNarrowScreen ? '10px 14px' : '12px 24px', 
+                background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+                border: 'none',
+                borderRadius: 12, 
+                fontWeight: 800, 
+                color: '#fff', 
+                cursor: 'pointer',
+                fontSize: isNarrowScreen ? 14 : 15,
+                boxShadow: '0 8px 20px rgba(37, 99, 235, 0.3)',
+                transition: 'all 0.2s ease',
+                flex: isNarrowScreen ? '1 1 auto' : undefined,
+              }}
+              onMouseEnter={(e) => {
+                if (isNarrowScreen) return;
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 12px 28px rgba(37, 99, 235, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                if (isNarrowScreen) return;
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 8px 20px rgba(37, 99, 235, 0.3)';
+              }}
+            >
+              📋 全カード一覧
+            </button>
+
+            {isNarrowScreen && (
+              <div
+                style={
+                  {
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    justifyContent: 'center',
+                    '--map-btn-size': '44px',
+                    '--map-btn-radius': '12px',
+                  } as any
+                }
+                aria-label="マップ"
+                title="マップ"
+              >
+                <MapButton variant="inline" showLabel={false} />
+              </div>
+            )}
+          </div>
           {renderAvatars()}
         </div>
 
@@ -442,22 +510,33 @@ export default function ResultPage() {
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: isNarrowScreen ? 16 : 28 }}>
           {/* 行く（柔らかい赤） */}
           <div style={{ border: '2px solid #fca5a5', background: '#fee2e2', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(252,165,165,0.5)' }}>
             <div
-              onClick={() => setExpanded(e => ({ ...e, go: !expanded.go }))}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer' }}
+              onClick={() => {
+                if (isNarrowScreen) return;
+                setExpanded(e => ({ ...e, go: !expanded.go }));
+              }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isNarrowScreen ? '12px 14px' : '12px 18px', cursor: isNarrowScreen ? 'default' : 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ fontWeight: 900, fontSize: 18, color: '#991b1b' }}>行く</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', opacity: .9 }}>{uniqueSectionCards.go?.length || 0}枚</div>
               </div>
-              <div style={{ transform: expanded.go ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#991b1b' }}>^</div>
+              {!isNarrowScreen && (
+                <div style={{ transform: openGo ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#991b1b' }}>^</div>
+              )}
             </div>
-            <div style={{ height: expanded.go ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.go ? '1px solid rgba(252,165,165,0.4)' : 'none', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '10px 14px 20px' }}>
-                <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
+            <div style={{ height: openGo ? (isNarrowScreen ? 'auto' : 240) : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openGo ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openGo ? '1px solid rgba(252,165,165,0.4)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : '10px 14px 20px' }}>
+                <div
+                  style={
+                    isNarrowScreen
+                      ? { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }
+                      : { display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }
+                  }
+                >
                   {(uniqueSectionCards.go?.length || 0) > 0 ? uniqueSectionCards.go!.map(renderCard) : (
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#dc2626' }}>カードなし</div>
                   )}
@@ -469,18 +548,29 @@ export default function ResultPage() {
           {/* 行かない（柔らかい青） */}
           <div style={{ border: '2px solid #93c5fd', background: '#eff6ff', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(147,197,253,0.5)' }}>
             <div
-              onClick={() => setExpanded(e => ({ ...e, no: !expanded.no }))}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer' }}
+              onClick={() => {
+                if (isNarrowScreen) return;
+                setExpanded(e => ({ ...e, no: !expanded.no }));
+              }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isNarrowScreen ? '12px 14px' : '12px 18px', cursor: isNarrowScreen ? 'default' : 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ fontWeight: 900, fontSize: 18, color: '#1e40af' }}>行かない</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#3b82f6', opacity: .9 }}>{uniqueSectionCards.no?.length || 0}枚</div>
               </div>
-              <div style={{ transform: expanded.no ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#1e40af' }}>^</div>
+              {!isNarrowScreen && (
+                <div style={{ transform: openNo ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#1e40af' }}>^</div>
+              )}
             </div>
-            <div style={{ height: expanded.no ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.no ? '1px solid rgba(147,197,253,0.4)' : 'none', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '10px 14px 20px' }}>
-                <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
+            <div style={{ height: openNo ? (isNarrowScreen ? 'auto' : 240) : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openNo ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openNo ? '1px solid rgba(147,197,253,0.4)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : '10px 14px 20px' }}>
+                <div
+                  style={
+                    isNarrowScreen
+                      ? { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }
+                      : { display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }
+                  }
+                >
                   {(uniqueSectionCards.no?.length || 0) > 0 ? uniqueSectionCards.no!.map(renderCard) : (
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#3b82f6' }}>カードなし</div>
                   )}
@@ -492,18 +582,29 @@ export default function ResultPage() {
           {/* どちらでもいい（灰色） */}
           <div style={{ border: '2px solid #d1d5db', background: '#e5e7eb', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(107,114,128,0.25)' }}>
             <div
-              onClick={() => setExpanded(e => ({ ...e, neutral: !expanded.neutral }))}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer' }}
+              onClick={() => {
+                if (isNarrowScreen) return;
+                setExpanded(e => ({ ...e, neutral: !expanded.neutral }));
+              }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isNarrowScreen ? '12px 14px' : '12px 18px', cursor: isNarrowScreen ? 'default' : 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ fontWeight: 900, fontSize: 18, color: '#374151' }}>どちらでもいい</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', opacity: .85 }}>{uniqueSectionCards.neutral?.length || 0}枚</div>
               </div>
-              <div style={{ transform: expanded.neutral ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#374151' }}>^</div>
+              {!isNarrowScreen && (
+                <div style={{ transform: openNeutral ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#374151' }}>^</div>
+              )}
             </div>
-            <div style={{ height: expanded.neutral ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.neutral ? '1px solid rgba(156,163,175,0.3)' : 'none', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '10px 14px 20px' }}>
-                <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
+            <div style={{ height: openNeutral ? (isNarrowScreen ? 'auto' : 240) : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openNeutral ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openNeutral ? '1px solid rgba(156,163,175,0.3)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : '10px 14px 20px' }}>
+                <div
+                  style={
+                    isNarrowScreen
+                      ? { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }
+                      : { display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }
+                  }
+                >
                   {(uniqueSectionCards.neutral?.length || 0) > 0 ? uniqueSectionCards.neutral!.map(renderCard) : (
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>カードなし</div>
                   )}
@@ -515,18 +616,29 @@ export default function ResultPage() {
           {/* 議論中（VS）（柔らかい橙） */}
           <div style={{ border: '2px solid #fdba74', background: '#ffedd5', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(251,146,60,0.35)' }}>
             <div
-              onClick={() => setExpanded(e => ({ ...e, vs: !expanded.vs }))}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer' }}
+              onClick={() => {
+                if (isNarrowScreen) return;
+                setExpanded(e => ({ ...e, vs: !expanded.vs }));
+              }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isNarrowScreen ? '12px 14px' : '12px 18px', cursor: isNarrowScreen ? 'default' : 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ fontWeight: 900, fontSize: 18, color: '#9a3412' }}>議論中（VS）</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#c2410c', opacity: .9 }}>{uniqueSectionCards.vs?.length || 0}枚</div>
               </div>
-              <div style={{ transform: expanded.vs ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#9a3412' }}>^</div>
+              {!isNarrowScreen && (
+                <div style={{ transform: openVs ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#9a3412' }}>^</div>
+              )}
             </div>
-            <div style={{ height: expanded.vs ? 240 : 0, transition: 'height .35s ease', overflow: 'hidden', borderTop: expanded.vs ? '1px solid rgba(253,186,116,0.45)' : 'none', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '10px 14px 20px' }}>
-                <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }}>
+            <div style={{ height: openVs ? (isNarrowScreen ? 'auto' : 240) : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openVs ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openVs ? '1px solid rgba(253,186,116,0.45)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : '10px 14px 20px' }}>
+                <div
+                  style={
+                    isNarrowScreen
+                      ? { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }
+                      : { display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }
+                  }
+                >
                   {(uniqueSectionCards.vs?.length || 0) > 0 ? uniqueSectionCards.vs!.map(renderCard) : (
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#c2410c' }}>カードなし</div>
                   )}
@@ -939,7 +1051,7 @@ export default function ResultPage() {
         );
       })()}
 
-      <MapButton />
+      {!isNarrowScreen && <MapButton />}
 
     </div>
   );

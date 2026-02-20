@@ -147,7 +147,7 @@
 .modalBody {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 24px;
   background: #f9fafb;
   display: flex;
@@ -156,10 +156,10 @@
 }
 
 .mapImage {
+  width: 100%;
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
-  width: auto;
-  height: auto;
   object-fit: contain;
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -202,9 +202,4 @@
     font-size: 1.25rem;
   }
 
-  .mapImage {
-    width: 100%;
-    height: auto;
-    max-height: none;
-  }
 }
