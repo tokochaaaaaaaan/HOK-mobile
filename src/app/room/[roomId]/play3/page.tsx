@@ -107,7 +107,7 @@ export default function Play3Page() {
 
   // Scale機能を削除して、常に画面全体を使用
 
-  // カード定義（39枚）
+  // 使用中カード定義
   const ALL_CARDS = useMemo(
     () =>
       baseCards.map((c) => ({
@@ -796,14 +796,19 @@ export default function Play3Page() {
   // 合致率計算（全体・カード別）
   useEffect(() => {
     if (!selections.length) return;
-    const matrix = convertSelectionsToMatrix(selections as any, 39);
+    const matrix = convertSelectionsToMatrix(
+      selections as any,
+      ALL_CARDS.map((card) => card.id)
+    );
     setOverallAgreement(agreementOverall(matrix));
     const map = new Map<string, number>();
     matrix.forEach((ratings, idx) => {
-      map.set(`card${idx + 1}`, agreementForCard(ratings));
+      const cardId = ALL_CARDS[idx]?.id;
+      if (!cardId) return;
+      map.set(cardId, agreementForCard(ratings));
     });
     setAgreementMap(map);
-  }, [selections]);
+  }, [ALL_CARDS, selections]);
 
   // presence 購読（入室中ユーザーだけを分母に）
   useEffect(() => {
@@ -2279,7 +2284,7 @@ export default function Play3Page() {
                 }}
                 style={{ cursor: 'pointer' }}
               >
-                <div className={styles.sectionTitleVs}>議論中（VS）</div>
+                <div className={styles.sectionTitleVs}>VS</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div className={styles.sectionCountVs}>{vsSorted.length}</div>
                   <div className={styles.sectionCountVs} style={{ fontSize: '1.2rem' }}>^</div>
@@ -3973,7 +3978,7 @@ export default function Play3Page() {
             textColor: '#fff',
           },
           vs: {
-            title: '議論中（VS）',
+            title: 'VS',
             cards: vsSorted,
             bgColor: '#ffedd5',
             borderColor: '#fdba74',

@@ -7,6 +7,7 @@ import CreateRoomButton from "./components/CreateRoomButton";
 import styles from "./page.module.css";
 import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { getFuriganaText } from "@/components/FuriganaText";
 
 export default function HomePage() {
   const router = useRouter();
@@ -68,7 +69,7 @@ export default function HomePage() {
 
         {/* 名前入力（共通） */}
         <div className={styles.row}>
-          <label className={styles.label}>名前：</label>
+          <label className={styles.label}>{getFuriganaText("名前")}：</label>
           <input
             className={styles.input}
             type="text"
@@ -86,9 +87,9 @@ export default function HomePage() {
 
         {/* ゲストセクション */}
         <div className={styles.section} style={{ marginTop: "1.5rem" }}>
-          <div className={styles.sectionLabel}>ゲスト参加</div>
+          <div className={styles.sectionLabel}>{getFuriganaText("ゲスト参加")}</div>
           <div className={styles.row}>
-            <label className={styles.label}>部屋：</label>
+            <label className={styles.label}>{getFuriganaText("部屋")}：</label>
             <select
               className={styles.input}
               value={selectedRoomId}
@@ -106,7 +107,7 @@ export default function HomePage() {
             </select>
           </div>
           <button className={styles.joinBtn} onClick={handleJoinRoom}>
-            参加する
+            {getFuriganaText("参加する")}
           </button>
         </div>
       </div>

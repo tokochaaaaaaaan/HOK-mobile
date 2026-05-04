@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { usePreventBack } from "@/hooks/usePreventBack";
+import { getFuriganaText } from "@/components/FuriganaText";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../../../../lib/firebase";
 import styles from "./page.module.css";
@@ -36,10 +37,10 @@ export default function SecondPage() {
   return (
     <div className={styles.fullscreenOverlay}>
       <div className={styles.overlayText}>
-        準備ができたら開始してください
+        {getFuriganaText("準備ができたら開始してください")}
       </div>
       <button className={styles.startBtn} onClick={handleStart}>
-        開始する
+        {getFuriganaText("開始する")}
       </button>
     </div>
   );

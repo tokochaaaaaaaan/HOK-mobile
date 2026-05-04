@@ -7,6 +7,7 @@ import { db } from "../../../lib/firebase";
 import { addAuthKey } from "../../../lib/firebase-auth";
 import { useUser } from "@/context/UserContext";
 import { useState } from "react";
+import { getFuriganaText } from "@/components/FuriganaText";
 
 // 衝突しやすい文字を除いたセット
 const alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -84,7 +85,7 @@ export default function CreateRoomButton() {
           opacity: isLoading ? 0.6 : 1,
         }}
       >
-        {isLoading ? "作成中..." : "ルーム作成"}
+        {isLoading ? getFuriganaText("作成中...") : getFuriganaText("ルーム作成")}
       </button>
     </>
   );

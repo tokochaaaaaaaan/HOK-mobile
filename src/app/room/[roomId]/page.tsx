@@ -5,6 +5,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useUser } from "@/context/UserContext";
 import { usePreventBack } from "@/hooks/usePreventBack";
+import { getFuriganaText } from "@/components/FuriganaText";
 import { doc, getDoc, updateDoc, onSnapshot, runTransaction } from "firebase/firestore";
 import { db } from "../../../../lib/firebase";
 import { addAuthKey } from "../../../../lib/firebase-auth";
@@ -162,7 +163,7 @@ export default function RoomPage() {
           boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
         }}
       >
-        ← トップへ戻る
+          ← {getFuriganaText("トップへ戻る")}
       </button>
 
       <div
@@ -178,11 +179,11 @@ export default function RoomPage() {
           boxSizing: "border-box",
         }}
       >
-        <h2 style={{ marginBottom: "8px" }}>ユーザ名: {userName}</h2>
+        <h2 style={{ marginBottom: "8px" }}>{getFuriganaText("ユーザ名")}: {userName}</h2>
       <h3 style={{ marginBottom: "16px", color: "#555" }}>ルームID: {roomId}</h3>
 
       <div style={{ textAlign: "left", marginBottom: "24px" }}>
-        <strong>参加者（{participantCount}/4）</strong>
+        <strong>{getFuriganaText("参加者")}（{participantCount}/4）</strong>
         <ul style={{ listStyle: "none", padding: 0, margin: "8px 0" }}>
           {Object.entries(roomData.participants || {})
             .map(([id, data]: [string, any]) => ({
@@ -213,7 +214,7 @@ export default function RoomPage() {
               cursor: "pointer",
             }}
           >
-            ゲーム開始
+            {getFuriganaText("ゲーム開始")}
           </button>
         </>
       ) : (

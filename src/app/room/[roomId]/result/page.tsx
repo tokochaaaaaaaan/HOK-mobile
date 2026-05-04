@@ -4,13 +4,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { collection, doc, onSnapshot, query } from 'firebase/firestore';
 import { agreementOverall, convertSelectionsToMatrix } from '../../../../utils/agreement-calculator';
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock';
 import { db } from '../../../../../lib/firebase';
 import { normalizeCategories } from '../../../../utils/normalizeCategories';
 import MapButton from '@/components/MapButton';
 import { useUser } from '@/context/UserContext';
 import { activeCards as baseCards } from '@/data/cards';
+import { getCardTitleText, getFuriganaText } from '@/components/FuriganaText';
 
-// カード定義（全39枚・共通データから生成）
+// 使用中カード定義（共通データから生成）
 const allCards = baseCards.map((c) => ({
   id: `card${c.id}`,
   title: c.title,
@@ -73,6 +75,9 @@ export default function ResultPage() {
   const [expandedCard, setExpandedCard] = useState<{ id: string; flipped: boolean } | null>(null);
   const [matchAnalysis, setMatchAnalysis] = useState<MatchAnalysisData[]>([]);
   const [matchAnalysisPairs, setMatchAnalysisPairs] = useState<MatchAnalysisPairData[]>([]);
+  const isModalOpen = !!(activeUserInfo || allCardsModalOpen || categoryDetailModal || cardModal || expandedCard);
+
+  useBodyScrollLock(isModalOpen);
 
   // スマホ幅判定
   useEffect(() => {
@@ -81,19 +86,6 @@ export default function ResultPage() {
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
   }, []);
-
-  // モーダル開閉時にbodyのスクロールを制御
-  useEffect(() => {
-    const isModalOpen = activeUserInfo || allCardsModalOpen || categoryDetailModal || cardModal || expandedCard;
-    if (isModalOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [activeUserInfo, allCardsModalOpen, categoryDetailModal, cardModal, expandedCard]);
 
   // 初期: go/no/neutralだけ展開
   useEffect(() => {
@@ -290,7 +282,10 @@ export default function ResultPage() {
         veryDont: [],
       }
     }));
-    const matrix = convertSelectionsToMatrix(pseudo as any, 39);
+    const matrix = convertSelectionsToMatrix(
+      pseudo as any,
+      baseCards.map((c) => `card${c.id}`)
+    );
     const overall = agreementOverall(matrix);
     setOverallAgreement(overall);
   }, [selections]);
@@ -313,7 +308,7 @@ export default function ResultPage() {
     dont: '行きたくない',
     go: '行く',
     no: '行かない',
-    vs: '議論中（VS）',
+    vs: 'VS',
     unassigned: '未分類',
   };
 
@@ -382,7 +377,7 @@ export default function ResultPage() {
             minHeight: isNarrowScreen ? 28 : undefined,
           }}
         >
-          {info?.title}
+          {info?.title ? getCardTitleText(info.title) : null}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 3 }}>
           {users.map(u => {
@@ -433,7 +428,7 @@ export default function ResultPage() {
                 e.currentTarget.style.boxShadow = '0 8px 20px rgba(37, 99, 235, 0.3)';
               }}
             >
-              📋 全カード一覧
+              📋 {getFuriganaText('全カード一覧')}
             </button>
 
             {isNarrowScreen && (
@@ -458,15 +453,15 @@ export default function ResultPage() {
         </div>
 
         <div style={{ marginBottom: 20, textAlign: 'center' }}>
-          <h1 style={{ fontSize: isNarrowScreen ? 24 : 32, fontWeight: 900, letterSpacing: '.5px', margin: 0, color: '#0f172a' }}>最終結果</h1>
-          <div style={{ marginTop: 8, color: '#475569', fontSize: 14 }}>参加者: {participantsSummary || '—'}</div>
+          <h1 style={{ fontSize: isNarrowScreen ? 24 : 32, fontWeight: 900, letterSpacing: '.5px', margin: 0, color: '#0f172a' }}>{getFuriganaText('最終結果')}</h1>
+          <div style={{ marginTop: 8, color: '#475569', fontSize: 14 }}>{getFuriganaText('参加者')}: {participantsSummary || '—'}</div>
           {/* 合致率表示を削除 */}
         </div>
 
         {/* 合致度サマリーエリア */}
         {matchAnalysis.length > 0 && (
           <div style={{ margin: '0 auto 32px', maxWidth: 900, background: 'linear-gradient(135deg,#f0fdf4,#ffffff)', border: '2px solid #10b981', borderRadius: 18, padding: '14px 18px', boxShadow: '0 6px 18px -8px rgba(16,185,129,0.15)' }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: '#065f46', marginBottom: 12, letterSpacing: '.5px' }}>合致度サマリー</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#065f46', marginBottom: 12, letterSpacing: '.5px' }}>{getFuriganaText('合致度サマリー')}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {matchAnalysis.map((match) => {
                 const userPairs = matchAnalysisPairs.filter(p => 
@@ -521,7 +516,7 @@ export default function ResultPage() {
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isNarrowScreen ? '12px 14px' : '12px 18px', cursor: isNarrowScreen ? 'default' : 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ fontWeight: 900, fontSize: 18, color: '#991b1b' }}>行く</div>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#991b1b' }}>{getFuriganaText('行く')}</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', opacity: .9 }}>{uniqueSectionCards.go?.length || 0}枚</div>
               </div>
               {!isNarrowScreen && (
@@ -555,7 +550,7 @@ export default function ResultPage() {
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isNarrowScreen ? '12px 14px' : '12px 18px', cursor: isNarrowScreen ? 'default' : 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ fontWeight: 900, fontSize: 18, color: '#1e40af' }}>行かない</div>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#1e40af' }}>{getFuriganaText('行かない')}</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#3b82f6', opacity: .9 }}>{uniqueSectionCards.no?.length || 0}枚</div>
               </div>
               {!isNarrowScreen && (
@@ -623,7 +618,7 @@ export default function ResultPage() {
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isNarrowScreen ? '12px 14px' : '12px 18px', cursor: isNarrowScreen ? 'default' : 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ fontWeight: 900, fontSize: 18, color: '#9a3412' }}>議論中（VS）</div>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#9a3412' }}>{getFuriganaText('VS')}</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#c2410c', opacity: .9 }}>{uniqueSectionCards.vs?.length || 0}枚</div>
               </div>
               {!isNarrowScreen && (
@@ -658,8 +653,8 @@ export default function ResultPage() {
           return sel ? sel.categories[k] : [];
         };
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={closeUserInfoModal}>
-            <div style={{ width: 'min(92vw, 420px)', maxHeight: '85dvh', overflowY: 'auto', background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }} onClick={e=>e.stopPropagation()}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, overflowY: 'auto', overscrollBehavior: 'contain' }} onClick={closeUserInfoModal}>
+            <div style={{ width: 'min(92vw, 420px)', maxHeight: '85dvh', overflowY: 'auto', overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch', background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }} onClick={e=>e.stopPropagation()}>
               <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>{user.userName}</div>
               <div style={{ display: 'grid', gap: 8 }}>
                 {catOrder.map(({key,label}) => {
@@ -671,7 +666,7 @@ export default function ResultPage() {
                         onClick={() => setCategoryDetailModal({ userId: user.userId, category: key as string })} 
                         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', cursor: 'pointer' }}
                       >
-                        <div style={{ color: categoryStyle.text, fontWeight: 700 }}>{label}</div>
+                        <div style={{ color: categoryStyle.text, fontWeight: 700 }}>{getFuriganaText(label)}</div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <span style={{ fontWeight: 800, color: categoryStyle.text }}>{list.length}</span>
                           <span style={{ color: categoryStyle.text }}>^</span>
@@ -691,16 +686,16 @@ export default function ResultPage() {
 
       {/* 全カード一覧モーダル */}
       {allCardsModalOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110 }} onClick={() => setAllCardsModalOpen(false)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110, overflowY: 'auto', overscrollBehavior: 'contain' }} onClick={() => setAllCardsModalOpen(false)}>
           <div style={{ width: 'min(95vw, 1200px)', maxHeight: '90vh', background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 25px 80px rgba(0,0,0,0.35)' }} onClick={e=>e.stopPropagation()}>
             <div style={{ padding: isNarrowScreen ? '16px 16px' : '24px 28px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(135deg, #f0f9ff, #f8fafc)' }}>
               <div>
-                <div style={{ fontWeight: 900, fontSize: isNarrowScreen ? 18 : 24, color: '#0f172a', marginBottom: 4 }}>📋 全カード一覧</div>
+                <div style={{ fontWeight: 900, fontSize: isNarrowScreen ? 18 : 24, color: '#0f172a', marginBottom: 4 }}>📋 {getFuriganaText('全カード一覧')}</div>
                 <div style={{ fontSize: isNarrowScreen ? 12 : 13, color: '#64748b' }}>全{allCardsWithFinalCategory.length}枚のカード、最終決定カテゴリと選択状況</div>
               </div>
               <button onClick={() => setAllCardsModalOpen(false)} style={{ padding: '8px 16px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontWeight: 700, color: '#374151', cursor: 'pointer' }}>閉じる</button>
             </div>
-            <div style={{ padding: isNarrowScreen ? 14 : 20, overflowY: 'auto', maxHeight: 'calc(90vh - 80px)' }}>
+            <div style={{ padding: isNarrowScreen ? 14 : 20, overflowY: 'auto', maxHeight: 'calc(90vh - 80px)', overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch' }}>
               <div style={{ display: 'grid', gridTemplateColumns: isNarrowScreen ? 'repeat(auto-fill, minmax(160px, 1fr))' : 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
                 {allCardsWithFinalCategory.map(({ cardId, finalCategory, users }) => {
                   const info = getCardInfo(cardId);
@@ -712,7 +707,7 @@ export default function ResultPage() {
                       </div>
                       <div style={{ padding: 10 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
-                          <div style={{ fontWeight: 800, color: '#111827', fontSize: 12, lineHeight: 1.3, flex: 1 }}>{info?.title}</div>
+                          <div style={{ fontWeight: 800, color: '#111827', fontSize: 12, lineHeight: 1.3, flex: 1 }}>{info?.title ? getCardTitleText(info.title) : null}</div>
                           <div style={{ background: finalStyle.bg, color: finalStyle.text, border: `1px solid ${finalStyle.border}`, borderRadius: 9999, padding: '2px 6px', fontSize: 10, fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>
                             {categoryNames[finalCategory]}
                           </div>
@@ -731,7 +726,7 @@ export default function ResultPage() {
                               </div>
                             );
                           }) : (
-                            <div style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>誰も選択していません</div>
+                            <div style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>{getFuriganaText('誰も選択していません')}</div>
                           )}
                         </div>
                       </div>
@@ -756,7 +751,7 @@ export default function ResultPage() {
         const categoryName = categoryNames[categoryDetailModal.category] || categoryDetailModal.category;
         
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 120 }} onClick={() => setCategoryDetailModal(null)}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 120, overflowY: 'auto', overscrollBehavior: 'contain' }} onClick={() => setCategoryDetailModal(null)}>
             <div style={{ width: 'min(95vw, 1000px)', maxHeight: '90vh', background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 25px 80px rgba(0,0,0,0.4)' }} onClick={e=>e.stopPropagation()}>
               <div style={{ 
                 padding: '16px 20px', 
@@ -767,7 +762,7 @@ export default function ResultPage() {
                 alignItems: 'center' 
               }}>
                 <div>
-                  <div style={{ fontWeight: 900, fontSize: 18, color: categoryStyle.text }}>{user.userName} - {categoryName}</div>
+                  <div style={{ fontWeight: 900, fontSize: 18, color: categoryStyle.text }}>{user.userName} - {getFuriganaText(categoryName)}</div>
                   <div style={{ fontSize: 14, color: categoryStyle.text, opacity: 0.8 }}>{categoryList.length}枚のカード</div>
                 </div>
                 <button 
@@ -784,7 +779,7 @@ export default function ResultPage() {
                   閉じる
                 </button>
               </div>
-              <div style={{ padding: 20, overflowY: 'auto', maxHeight: 'calc(90vh - 100px)' }}>
+              <div style={{ padding: 20, overflowY: 'auto', maxHeight: 'calc(90vh - 100px)', overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch' }}>
                 {categoryList.length > 0 ? (
                   <div style={{ display: 'grid', gridTemplateColumns: isNarrowScreen ? 'repeat(auto-fill, minmax(160px, 1fr))' : 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
                     {categoryList.map((card, index) => {
@@ -826,7 +821,7 @@ export default function ResultPage() {
                               alignItems: 'flex-start',
                               gap: 6
                             }}>
-                              <span style={{ lineHeight: 1.3 }}>{info?.title}</span>
+                              <span style={{ lineHeight: 1.3 }}>{info?.title ? getCardTitleText(info.title) : null}</span>
                               <div style={{ 
                                 background: categoryStyle.bg, 
                                 color: categoryStyle.text, 
@@ -867,14 +862,14 @@ export default function ResultPage() {
         const info = getCardInfo(cardModal);
         const users = cardChoiceMap[cardModal]?.users || [];
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, overflowY: 'auto', overscrollBehavior: 'contain' }}>
             <div style={{ width: 'min(92vw,720px)', background: '#fff', borderRadius: 18, boxShadow: '0 30px 80px -20px rgba(15,23,42,.4)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: 16, borderBottom: '1px solid #e5e7eb' }}>
                 <div style={{ width: '100%', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden' }}>
                   <img src={info?.src} alt="card" style={{ width: '100%', height: 220, objectFit: 'contain' }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 12, color: '#0f172a' }}>{info?.title}</div>
+                  <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 12, color: '#0f172a' }}>{info?.title ? getCardTitleText(info.title) : null}</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {users.map(u => {
                       const st = categoryChipStyle[u.category] || categoryChipStyle.neutral;
@@ -913,6 +908,8 @@ export default function ResultPage() {
               alignItems: 'center',
               justifyContent: 'center',
               padding: 12,
+              overflowY: 'auto',
+              overscrollBehavior: 'contain',
             }}
             onClick={() => setExpandedCard(null)}
           >
@@ -1023,7 +1020,7 @@ export default function ResultPage() {
               {/* カード情報 */}
               <div style={{ textAlign: 'center', marginBottom: 16 }}>
                 <div style={{ fontWeight: 900, fontSize: 20, color: '#111827' }}>
-                  {info?.title}
+                  {info?.title ? getCardTitleText(info.title) : null}
                 </div>
                 <div style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>
                   クリックで回転

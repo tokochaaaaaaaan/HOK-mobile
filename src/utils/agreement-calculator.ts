@@ -102,12 +102,14 @@ export function convertSelectionsToMatrix(
       veryDont: Array<{id: string}>;
     };
   }>,
-  totalCards: number = 39
+  totalCardsOrCardIds: number | string[] = 39
 ): number[][] {
   const cardMatrix: number[][] = [];
+  const cardIds = Array.isArray(totalCardsOrCardIds)
+    ? totalCardsOrCardIds
+    : Array.from({ length: totalCardsOrCardIds }, (_, index) => `card${index + 1}`);
 
-  for (let cardIndex = 1; cardIndex <= totalCards; cardIndex++) {
-    const cardId = `card${cardIndex}`;
+  for (const cardId of cardIds) {
     const cardRatings: number[] = [];
 
     userSelections.forEach(selection => {

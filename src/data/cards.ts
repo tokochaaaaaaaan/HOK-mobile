@@ -6,8 +6,7 @@ export type CardData = {
 };
 
 export const ACTIVE_CARD_IDS = [
-  1, 3, 4, 6, 8, 9, 10, 12, 13, 16, 17, 18, 19, 21, 23, 24, 25, 28, 29, 30,
-  31, 33, 36,
+  1, 3, 8, 9, 10, 16, 17, 18, 23, 25,
 ] as const;
 
 const ACTIVE_CARD_ID_SET: ReadonlySet<number> = new Set<number>(ACTIVE_CARD_IDS);

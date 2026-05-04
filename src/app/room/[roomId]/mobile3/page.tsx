@@ -3,9 +3,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { usePreventBack } from "@/hooks/usePreventBack";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { activeCards } from "@/data/cards";
 import { useUser } from "@/context/UserContext";
 import MapButton from "@/components/MapButton";
+import { getCardTitleText, getFuriganaText } from "@/components/FuriganaText";
 import { addAuthKey } from "../../../../../lib/firebase-auth";
 import { db } from "../../../../../lib/firebase";
 import {
@@ -74,6 +76,7 @@ export default function Mobile3Page() {
 
   const [participants, setParticipants] = useState<string[]>([]);
   const [state, setState] = useState<Mobile3State>({ phase: "voting", stage: "board", cardId: null, sessionId: null });
+  const [hasLoadedRoomState, setHasLoadedRoomState] = useState(false);
   const [votes, setVotes] = useState<Array<{ id: string; sessionId: string; cardId: string; userId: string; vote: VoteChoice }>>([]);
   const [assignments, setAssignments] = useState<Record<string, AssignmentDoc>>({});
 
@@ -82,18 +85,23 @@ export default function Mobile3Page() {
   const [previewCardId, setPreviewCardId] = useState<string | null>(null);
   const [previewIsBack, setPreviewIsBack] = useState(false);
 
-  const [isCompactWindow, setIsCompactWindow] = useState(false);
-
   const [isNarrowScreen, setIsNarrowScreen] = useState(false);
 
   const [isBack, setIsBack] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<React.ReactNode | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const [encouragementIndex, setEncouragementIndex] = useState(0);
+  const [showMissionComplete, setShowMissionComplete] = useState(false);
+  const [showResultCta, setShowResultCta] = useState(false);
+  const missionCompleteTriggeredRef = useRef(false);
+  const missionCompleteTimerRef = useRef<number | null>(null);
+  const celebrationAudioContextRef = useRef<AudioContext | null>(null);
 
   // afterVoteの「閉じる」は各ユーザー（各端末）で完結させる
   const [dismissedAfterVoteKey, setDismissedAfterVoteKey] = useState<string | null>(null);
 
   const [showSubmittedResults, setShowSubmittedResults] = useState(false);
+  const [hasLoadedSubmittedSelections, setHasLoadedSubmittedSelections] = useState(false);
   const [submittedSelections, setSubmittedSelections] = useState<
     Array<{
       userName: string;
@@ -107,8 +115,18 @@ export default function Mobile3Page() {
   const [submittedActiveUser, setSubmittedActiveUser] = useState<string | null>(null);
 
   const [showVsWarning, setShowVsWarning] = useState(false);
+  const [showAllCardsModal, setShowAllCardsModal] = useState(false);
+  const [deckRevealCardId, setDeckRevealCardId] = useState<string | null>(null);
+  const [deckRevealFlipped, setDeckRevealFlipped] = useState(false);
+  const [hasCompletedInitialDiscussionGate, setHasCompletedInitialDiscussionGate] = useState(false);
+  const deckFlipTimerRef = useRef<number | null>(null);
+  const deckOpenTimerRef = useRef<number | null>(null);
+  const deckAutoStartTimerRef = useRef<number | null>(null);
+  const initialDiscussionGateTimerRef = useRef<number | null>(null);
 
-  const showToast = (msg: string) => {
+  const encouragementMessages = ["どんどん行こう！", "その調子！", "みんなで解決しよう！"];
+
+  const showToast = (msg: React.ReactNode) => {
     setToast(msg);
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => {
@@ -141,6 +159,7 @@ export default function Mobile3Page() {
     if (!roomId || typeof roomId !== "string") return;
     const ref = doc(db, "rooms", roomId, STATE_DOC, "state");
     const unsub = onSnapshot(ref, (snap) => {
+      setHasLoadedRoomState(true);
       if (!snap.exists()) return;
       const next = snap.data() as any;
       setState(next);
@@ -313,6 +332,8 @@ export default function Mobile3Page() {
       } else {
         setSubmittedSelections(list);
       }
+
+      setHasLoadedSubmittedSelections(true);
     });
     return () => unsub();
   }, [roomId, participants]);
@@ -445,6 +466,17 @@ export default function Mobile3Page() {
     return cards.find((c) => c.cardId === previewCardId) ?? null;
   }, [previewCardId, cards]);
 
+  const shouldDelayInitialDiscussionModal =
+    hasLoadedRoomState &&
+    !hasCompletedInitialDiscussionGate &&
+    phase === "voting" &&
+    stage === "discussion" &&
+    !!currentCard;
+
+  const discussionModalOpen = phase === "voting" && stage === "discussion" && !!currentCard && !shouldDelayInitialDiscussionModal;
+  const afterVoteModalOpen = phase === "voting" && stage === "afterVote" && !!state.lastMove && !!afterVoteKey && dismissedAfterVoteKey !== afterVoteKey;
+  useBodyScrollLock(discussionModalOpen || afterVoteModalOpen || !!previewCard || showSubmittedResults || showVsWarning || showAllCardsModal || showMissionComplete);
+
   const expectedUserIds = useMemo(() => {
     const ids = Array.isArray(state.expectedUserIds) ? state.expectedUserIds : [];
     const cleaned = ids.map((v) => (typeof v === "string" ? v.trim() : "")).filter(Boolean);
@@ -520,6 +552,19 @@ export default function Mobile3Page() {
     return ordered.reduce((acc, name) => acc + (votesForCurrent.has(name) ? 1 : 0), 0);
   }, [participants, votesForCurrent, currentCard]);
 
+  const consensusVote = useMemo(() => {
+    if (!currentCard) return null;
+    const ordered = (expectedUserIds.length > 0 ? expectedUserIds : participants).filter(Boolean);
+    if (ordered.length === 0) return null;
+
+    const votesInOrder = ordered.map((name) => votesForCurrent.get(name) ?? null);
+    if (votesInOrder.some((vote) => vote == null)) return null;
+
+    const firstVote = votesInOrder[0];
+    if (firstVote !== "go" && firstVote !== "no") return null;
+    return votesInOrder.every((vote) => vote === firstVote) ? firstVote : null;
+  }, [currentCard, expectedUserIds, participants, votesForCurrent]);
+
   const canFinish = useMemo(() => {
     if (cards.length === 0) return false;
     return cards.every((c) => {
@@ -546,18 +591,18 @@ export default function Mobile3Page() {
     if (st === "go") return "行く";
     if (st === "no") return "行かない";
     if (st === "neutral") return "保留";
-    return "議論中（VS）";
+    return "VS";
   };
 
   const finalizeCurrentIfReady = async () => {
     if (!roomId || typeof roomId !== "string") return;
     if (!currentCard) return;
     if (expectedCount < 1) return;
-    if (votedCount !== expectedCount) return;
     if (stage !== "discussion") return;
     if (!state.sessionId) return;
+    if (!consensusVote) return;
 
-    const finalStatus = computeFinalStatus(votesForCurrent);
+    const finalStatus: AssignmentStatus = consensusVote === "go" ? "go" : "no";
 
     await runTransaction(db, async (tx) => {
       // assignments更新
@@ -592,7 +637,13 @@ export default function Mobile3Page() {
       );
     });
 
-    showToast(`「${currentCard.title}」→ ${statusLabel(finalStatus)}`);
+    showToast(
+      <>
+        {getCardTitleText(currentCard.title)} のミッションは達成！
+        <br />
+        {getFuriganaText(finalStatus === "go" ? "行く" : "行かない")}ことになったよ！
+      </>
+    );
     setIsBack(false);
   };
 
@@ -600,12 +651,11 @@ export default function Mobile3Page() {
   useEffect(() => {
     if (phase !== "voting") return;
     if (!currentCard) return;
-    if (expectedCount < 1) return;
-    if (votedCount !== expectedCount) return;
     if (stage !== "discussion") return;
+    if (!consensusVote) return;
     finalizeCurrentIfReady().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, currentCard?.cardId, votedCount, expectedCount]);
+  }, [phase, currentCard?.cardId, consensusVote, stage]);
 
   const startDiscussion = async (cardId: string) => {
     if (!roomId || typeof roomId !== "string") return;
@@ -638,7 +688,6 @@ export default function Mobile3Page() {
       { merge: true }
     );
     setIsBack(false);
-    setIsCompactWindow(false);
   };
 
   const castVote = async (vote: VoteChoice) => {
@@ -660,8 +709,6 @@ export default function Mobile3Page() {
       }),
       { merge: true }
     );
-
-    showToast("投票しました");
   };
 
   const orderedParticipants = (expectedUserIds.length > 0
@@ -701,13 +748,24 @@ export default function Mobile3Page() {
     return by;
   }, [cards, assignments, autoAssignments]);
 
+  const remainingVsAfterLastMoveCount = useMemo(() => {
+    return cards.reduce((count, card) => {
+      const effectiveStatus: AssignmentStatus =
+        stage === "afterVote" && state.lastMove?.cardId === card.cardId
+          ? state.lastMove.status
+          : assignments[card.cardId]?.status ?? autoAssignments[card.cardId] ?? "neutral";
+
+      return count + (effectiveStatus === "vs" ? 1 : 0);
+    }, 0);
+  }, [assignments, autoAssignments, cards, stage, state.lastMove]);
+
   const boardSections = useMemo(() => {
     return [
       // mobile2の配色に寄せる
       { key: "go", label: "行きたい", bg: "#f0fdf4", border: "#16a34a" },
       { key: "no", label: "行きたくない", bg: "#fef2f2", border: "#ef4444" },
       // VSは配色自由（要件的には見やすければOK）
-      { key: "vs", label: "議論中", bg: "#f1f5f9", border: "#64748b" },
+      { key: "vs", label: "VS", bg: "#f1f5f9", border: "#64748b" },
       { key: "neutral", label: "どちらでもいい", bg: "#fffbeb", border: "#f59e0b" },
     ] as const;
   }, []);
@@ -721,10 +779,189 @@ export default function Mobile3Page() {
     setSelectedCardId(cardId);
   };
 
-  const canStartDiscussion = phase === "voting" && canUseBoardControls && !!selectedCardId;
-
   const vsCount = ((areaLists as any).vs as typeof cards)?.length ?? 0;
-  const canOpenResult = true;
+  const vsCards = ((areaLists as any).vs as typeof cards) ?? [];
+  const initialVsCount = useMemo(() => {
+    return cards.reduce((count, card) => count + (autoAssignments[card.cardId] === "vs" ? 1 : 0), 0);
+  }, [autoAssignments, cards]);
+  const selectedVsCard = useMemo(() => vsCards.find((c) => c.cardId === selectedCardId) ?? null, [vsCards, selectedCardId]);
+  const nextDeckCard = selectedVsCard ?? vsCards[0] ?? null;
+  const deckRevealCard = useMemo(() => {
+    if (!deckRevealCardId) return null;
+    return cards.find((c) => c.cardId === deckRevealCardId) ?? null;
+  }, [cards, deckRevealCardId]);
+  const deckDisplayCard = deckRevealCard ?? nextDeckCard ?? currentCard;
+  const canStartDiscussion = phase === "voting" && canUseBoardControls && !!nextDeckCard;
+  const canOpenResult = showResultCta && canFinish;
+
+  useEffect(() => {
+    if (stage !== "board") return;
+    if (!canUseBoardControls) return;
+    if (vsCards.length === 0) {
+      if (selectedCardId) setSelectedCardId(null);
+      return;
+    }
+    if (!selectedCardId || !vsCards.some((c) => c.cardId === selectedCardId)) {
+      setSelectedCardId(vsCards[0].cardId);
+    }
+  }, [canUseBoardControls, selectedCardId, stage, vsCards]);
+
+  useEffect(() => {
+    if (discussionModalOpen) {
+      setDeckRevealCardId(null);
+      setDeckRevealFlipped(false);
+    }
+  }, [discussionModalOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (deckFlipTimerRef.current) window.clearTimeout(deckFlipTimerRef.current);
+      if (deckOpenTimerRef.current) window.clearTimeout(deckOpenTimerRef.current);
+      if (deckAutoStartTimerRef.current) window.clearTimeout(deckAutoStartTimerRef.current);
+      if (initialDiscussionGateTimerRef.current) window.clearTimeout(initialDiscussionGateTimerRef.current);
+      if (missionCompleteTimerRef.current) window.clearTimeout(missionCompleteTimerRef.current);
+      if (celebrationAudioContextRef.current) {
+        void celebrationAudioContextRef.current.close().catch(() => undefined);
+        celebrationAudioContextRef.current = null;
+      }
+    };
+  }, []);
+
+  const startDeckDiscussion = () => {
+    if (!nextDeckCard) return;
+    if (!canUseBoardControls) return;
+    if (deckRevealCardId) return;
+
+    setEncouragementIndex((prev) => (prev + 1) % encouragementMessages.length);
+    setSelectedCardId(nextDeckCard.cardId);
+    setDeckRevealCardId(nextDeckCard.cardId);
+    setDeckRevealFlipped(false);
+
+    if (deckFlipTimerRef.current) window.clearTimeout(deckFlipTimerRef.current);
+    if (deckOpenTimerRef.current) window.clearTimeout(deckOpenTimerRef.current);
+
+    deckFlipTimerRef.current = window.setTimeout(() => {
+      setDeckRevealFlipped(true);
+    }, 40);
+
+    deckOpenTimerRef.current = window.setTimeout(() => {
+      startDiscussion(nextDeckCard.cardId).catch(() => {
+        setDeckRevealCardId(null);
+        setDeckRevealFlipped(false);
+      });
+    }, 720);
+  };
+
+  const ensureCelebrationAudioReady = async () => {
+    if (typeof window === "undefined") return null;
+    const AudioCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtor) return null;
+    if (!celebrationAudioContextRef.current) celebrationAudioContextRef.current = new AudioCtor();
+    if (celebrationAudioContextRef.current.state === "suspended") {
+      await celebrationAudioContextRef.current.resume().catch(() => undefined);
+    }
+    return celebrationAudioContextRef.current;
+  };
+
+  const playMissionCompleteSound = async () => {
+    const ctx = await ensureCelebrationAudioReady();
+    if (!ctx) return;
+
+    const pulse = (frequency: number, startOffset: number, duration: number, type: OscillatorType, gainPeak: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const startAt = ctx.currentTime + startOffset;
+      const endAt = startAt + duration;
+      osc.type = type;
+      osc.frequency.setValueAtTime(frequency, startAt);
+      osc.frequency.exponentialRampToValueAtTime(frequency * 1.25, endAt);
+      gain.gain.setValueAtTime(0.0001, startAt);
+      gain.gain.exponentialRampToValueAtTime(gainPeak, startAt + duration * 0.18);
+      gain.gain.exponentialRampToValueAtTime(0.0001, endAt);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startAt);
+      osc.stop(endAt);
+    };
+
+    pulse(520, 0, 0.18, "triangle", 0.04);
+    pulse(680, 0.14, 0.2, "triangle", 0.04);
+    pulse(860, 0.28, 0.22, "sine", 0.035);
+    pulse(1080, 0.44, 0.3, "sine", 0.03);
+  };
+
+  useEffect(() => {
+    if (!nextDeckCard) return;
+    if (!canUseBoardControls) return;
+    if (discussionModalOpen || afterVoteModalOpen || showAllCardsModal || showVsWarning) return;
+    if (deckRevealCardId) return;
+
+    if (deckAutoStartTimerRef.current) window.clearTimeout(deckAutoStartTimerRef.current);
+    deckAutoStartTimerRef.current = window.setTimeout(() => {
+      startDeckDiscussion();
+    }, 520);
+
+    return () => {
+      if (deckAutoStartTimerRef.current) {
+        window.clearTimeout(deckAutoStartTimerRef.current);
+        deckAutoStartTimerRef.current = null;
+      }
+    };
+  }, [afterVoteModalOpen, canUseBoardControls, deckRevealCardId, discussionModalOpen, nextDeckCard?.cardId, showAllCardsModal, showVsWarning]);
+
+  useEffect(() => {
+    if (!hasLoadedRoomState) return;
+    if (hasCompletedInitialDiscussionGate) return;
+
+    if (!(phase === "voting" && stage === "discussion" && currentCard)) {
+      setHasCompletedInitialDiscussionGate(true);
+      return;
+    }
+
+    setSelectedCardId(currentCard.cardId);
+    setDeckRevealCardId(currentCard.cardId);
+    setDeckRevealFlipped(false);
+
+    if (deckFlipTimerRef.current) window.clearTimeout(deckFlipTimerRef.current);
+    if (initialDiscussionGateTimerRef.current) window.clearTimeout(initialDiscussionGateTimerRef.current);
+
+    deckFlipTimerRef.current = window.setTimeout(() => {
+      setDeckRevealFlipped(true);
+    }, 40);
+
+    initialDiscussionGateTimerRef.current = window.setTimeout(() => {
+      setHasCompletedInitialDiscussionGate(true);
+      initialDiscussionGateTimerRef.current = null;
+    }, 920);
+
+    return () => {
+      if (initialDiscussionGateTimerRef.current) {
+        window.clearTimeout(initialDiscussionGateTimerRef.current);
+        initialDiscussionGateTimerRef.current = null;
+      }
+    };
+  }, [currentCard, hasCompletedInitialDiscussionGate, hasLoadedRoomState, phase, stage]);
+
+  useEffect(() => {
+    if (phase !== "voting" || stage !== "board") return;
+    if (!hasLoadedSubmittedSelections) return;
+    if (initialVsCount <= 0) return;
+    if (vsCount > 0) return;
+    if (discussionModalOpen || afterVoteModalOpen || showAllCardsModal || !!previewCard) return;
+    if (missionCompleteTriggeredRef.current) return;
+
+    missionCompleteTriggeredRef.current = true;
+    setShowMissionComplete(true);
+    setShowResultCta(true);
+    void playMissionCompleteSound();
+
+    return () => {
+      if (missionCompleteTimerRef.current) {
+        window.clearTimeout(missionCompleteTimerRef.current);
+        missionCompleteTimerRef.current = null;
+      }
+    };
+  }, [afterVoteModalOpen, discussionModalOpen, hasLoadedSubmittedSelections, initialVsCount, phase, previewCard, showAllCardsModal, stage, vsCount]);
 
   const closePreview = () => {
     setPreviewCardId(null);
@@ -746,7 +983,26 @@ export default function Mobile3Page() {
       { merge: true }
     );
     setSelectedCardId(null);
-    setIsCompactWindow(false);
+  };
+
+  const openMissionCompleteOverlay = () => {
+    if (initialVsCount <= 0) return;
+    if (missionCompleteTriggeredRef.current) return;
+
+    missionCompleteTriggeredRef.current = true;
+    setShowMissionComplete(true);
+    setShowResultCta(true);
+    void playMissionCompleteSound();
+  };
+
+  const handleAfterVoteClose = () => {
+    if (afterVoteKey) {
+      setDismissedAfterVoteKey(afterVoteKey);
+    }
+
+    if (initialVsCount <= 0) return;
+    if (remainingVsAfterLastMoveCount !== 0) return;
+    openMissionCompleteOverlay();
   };
 
   // 旧「議論終了」ステージが残っている部屋でもウィンドウを出さずに盤面へ戻す
@@ -774,6 +1030,19 @@ export default function Mobile3Page() {
         overscrollBehavior: "none",
       }}
     >
+      <style>{`
+        @keyframes mobile3CelebrateFloat {
+          0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(0.9); opacity: 0; }
+          12% { opacity: 1; }
+          100% { transform: translate3d(var(--driftX), var(--driftY), 0) rotate(var(--spin)) scale(1.15); opacity: 0; }
+        }
+        @keyframes mobile3CelebratePulse {
+          0% { transform: scale(0.86); opacity: 0.35; }
+          35% { transform: scale(1.04); opacity: 1; }
+          100% { transform: scale(1.14); opacity: 0; }
+        }
+      `}</style>
+
       {toast && (
         <div
           style={{
@@ -801,241 +1070,209 @@ export default function Mobile3Page() {
       )}
 
       <div style={{ width: "100%", maxWidth: "560px", margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
-          <div style={{ fontWeight: 900, fontSize: "1.25rem", color: "#0f172a" }}>議論していきましょう！</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-            {orderedParticipants.length > 0 && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  overflowX: "auto",
-                  WebkitOverflowScrolling: "touch",
-                  maxWidth: "min(62vw, 320px)",
-                  paddingBottom: 2,
-                }}
-                aria-label="参加者（タップでmobile2の提出結果を見る）"
-              >
-                {orderedParticipants.map((name) => (
-                  <button
-                    key={`head-${name}`}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 900, fontSize: "1.35rem", color: "#0f172a" }}>{getFuriganaText("ミッション！")}</div>
+            <div style={{ marginTop: 6, fontWeight: 900, color: "#334155", lineHeight: 1.6 }}>
+              {getFuriganaText("意見が分かれているカードを話し合って解決しよう！")}
+            </div>
+          </div>
+
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            borderRadius: 24,
+            border: "2px solid rgba(14,165,233,0.18)",
+            background: "linear-gradient(180deg, #eff6ff 0%, #ffffff 56%, #f8fafc 100%)",
+            boxShadow: "0 18px 46px rgba(14,165,233,0.12)",
+            padding: 16,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isNarrowScreen ? "148px minmax(0, 1fr)" : "188px minmax(0, 1fr)",
+              gap: 14,
+              alignItems: "center",
+            }}
+          >
+            <div
+              style={{
+                position: "relative",
+                width: "100%",
+                aspectRatio: "3 / 4.2",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {deckDisplayCard ? (
+                <>
+                  {Array.from({ length: deckRevealCardId ? Math.max(Math.min(vsCards.length, 4) - 1, 0) : Math.min(vsCards.length, 4) }).map((_, index) => {
+                    const reverseIndex = (deckRevealCardId ? Math.max(Math.min(vsCards.length, 4) - 1, 0) : Math.min(vsCards.length, 4)) - index - 1;
+                    return (
+                      <div
+                        key={`deck-layer-${index}`}
+                        style={{
+                          position: "absolute",
+                          inset: `${12 + reverseIndex * 5}px ${18 + reverseIndex * 3}px ${18 - reverseIndex * 3}px ${12 - reverseIndex * 2}px`,
+                          borderRadius: 18,
+                          overflow: "hidden",
+                          background: "linear-gradient(180deg, #e2e8f0 0%, #cbd5e1 100%)",
+                          border: "2px solid rgba(100,116,139,0.24)",
+                          boxShadow: "0 10px 24px rgba(15,23,42,0.12)",
+                        }}
+                      >
+                        <img
+                          src={deckDisplayCard.backSrc}
+                          alt="VSデッキ"
+                          style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", opacity: 0.96 }}
+                          draggable={false}
+                        />
+                      </div>
+                    );
+                  })}
+
+                  {deckRevealCard && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 8,
+                        perspective: "1200px",
+                        transform: deckRevealFlipped ? "translate(12%, -18%) scale(1.02)" : "translate(0, 0)",
+                        transition: "transform 680ms cubic-bezier(0.22, 1, 0.36, 1)",
+                        zIndex: 5,
+                      }}
+                    >
+                      <div
+                        style={{
+                          position: "relative",
+                          width: "100%",
+                          height: "100%",
+                          transformStyle: "preserve-3d",
+                          transform: `rotateY(${deckRevealFlipped ? 180 : 0}deg)`,
+                          transition: "transform 640ms cubic-bezier(0.22, 1, 0.36, 1)",
+                          boxShadow: "0 24px 50px rgba(14,165,233,0.22)",
+                          borderRadius: 20,
+                        }}
+                      >
+                        <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", borderRadius: 20, overflow: "hidden", background: "#dbeafe" }}>
+                          <img src={deckRevealCard.backSrc} alt="VSデッキ" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} draggable={false} />
+                        </div>
+                        <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", transform: "rotateY(180deg)", borderRadius: 20, overflow: "hidden", background: "#fff" }}>
+                          <img src={deckRevealCard.frontSrc} alt={deckRevealCard.title} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} draggable={false} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {!deckRevealCard && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 8,
+                        borderRadius: 20,
+                        overflow: "hidden",
+                        background: "#dbeafe",
+                        border: "2px solid rgba(14,165,233,0.22)",
+                        boxShadow: "0 20px 46px rgba(14,165,233,0.18)",
+                      }}
+                    >
+                      <img src={deckDisplayCard.backSrc} alt="VSデッキ" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} draggable={false} />
+                    </div>
+                  )}
+
+                  <div
                     style={{
-                      width: 24,
-                      height: 24,
+                      position: "absolute",
+                      top: 2,
+                      right: 4,
+                      minWidth: 44,
+                      height: 44,
                       borderRadius: 9999,
-                      border: "1px solid rgba(15,23,42,0.14)",
-                      background: "#fff",
+                      background: "#0f172a",
+                      color: "#fff",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       fontWeight: 900,
-                      color: "#0f172a",
-                      boxShadow: "0 2px 10px rgba(15,23,42,0.10)",
-                      cursor: "pointer",
-                      flex: "0 0 auto",
-                    }}
-                    title={name}
-                    aria-label={`${name}のmobile2最終結果を見る`}
-                    onClick={() => {
-                      setSubmittedActiveUser(name);
-                      setShowSubmittedResults(true);
+                      fontSize: "1rem",
+                      boxShadow: "0 12px 30px rgba(15,23,42,0.22)",
+                      zIndex: 7,
                     }}
                   >
-                    {(name?.[0] || "?").toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 1ページ目/2ページ目：盤面（選択で枠がつく） */}
-        <div style={{ marginTop: 8 }}>
-          {boardSections.map((sec) => {
-            const list = (areaLists as any)[sec.key] as typeof cards;
-            const isNeutral = sec.key === "neutral";
-            const cardWidth = isNeutral ? 84 : 112;
-            const showList = isNeutral ? list.slice(0, 6) : list;
-            return (
-              <div
-                key={sec.key}
-                style={{
-                  border: `2px solid ${sec.border}`,
-                  background: sec.bg,
-                  borderRadius: 12,
-                  padding: 10,
-                  marginBottom: 12,
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <div style={{ fontWeight: 900, color: "#0f172a" }}>
-                    {sec.label}
+                    {vsCards.length}
                   </div>
-                  <div style={{ fontWeight: 900, color: "#0f172a", opacity: 0.9 }}>
-                    {list.length}
-                  </div>
+                </>
+              ) : (
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    borderRadius: 20,
+                    border: "2px dashed rgba(100,116,139,0.34)",
+                    background: "rgba(255,255,255,0.78)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    textAlign: "center",
+                    padding: 12,
+                    fontWeight: 900,
+                    color: "#64748b",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  VS するカードは<br />ありません
                 </div>
+              )}
+            </div>
 
-                {showList.length === 0 ? (
-                  <div style={{ color: "rgba(15,23,42,0.55)", fontWeight: 800, fontSize: 12 }}>
-                    （なし）
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 10,
-                      overflowX: "auto",
-                      paddingBottom: 6,
-                      WebkitOverflowScrolling: "touch",
-                    }}
-                  >
-                    {showList.map((c) => {
-                      const isSelected = selectedCardId === c.cardId;
-                      return (
-                        <button
-                          key={c.cardId}
-                          onClick={() => onSelectCard(c.cardId)}
-                          style={{
-                            width: cardWidth,
-                            flex: "0 0 auto",
-                            background: "#fff",
-                            borderRadius: 12,
-                            padding: 8,
-                            border: isSelected ? "3px solid #f97316" : "1px solid rgba(15,23,42,0.14)",
-                            boxShadow: isSelected ? "0 0 0 3px rgba(249,115,22,0.25)" : "0 2px 10px rgba(15,23,42,0.10)",
-                            cursor: "pointer",
-                            textAlign: "left",
-                          }}
-                          aria-label={`${c.title}を選択`}
-                        >
-                          <div style={{ width: "100%", aspectRatio: "3/4", borderRadius: 10, overflow: "hidden", background: "#f1f5f9" }}>
-                            <img
-                              src={c.frontSrc}
-                              alt={c.title}
-                              style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
-                              draggable={false}
-                            />
-                          </div>
-                          <div
-                            style={{
-                              marginTop: 6,
-                              fontWeight: 900,
-                              fontSize: 12,
-                              color: "#0f172a",
-                              lineHeight: 1.2,
-                              overflow: "hidden",
-                              display: "-webkit-box",
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: "vertical" as any,
-                            }}
-                          >
-                            {c.title}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+            <div style={{ minWidth: 0 }}>
+              {vsCards.length === 0 ? (
+                <button
+                  onClick={openMissionCompleteOverlay}
+                  disabled={initialVsCount <= 0 || showMissionComplete}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "6px 12px",
+                    borderRadius: 9999,
+                    background: showMissionComplete ? "rgba(250,204,21,0.18)" : "rgba(14,165,233,0.14)",
+                    color: showMissionComplete ? "#a16207" : "#0369a1",
+                    fontWeight: 900,
+                    fontSize: 12,
+                    border: "1px solid rgba(14,165,233,0.16)",
+                    cursor: initialVsCount > 0 && !showMissionComplete ? "pointer" : "default",
+                  }}
+                >
+                  クリア
+                </button>
+              ) : (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 9999, background: "rgba(14,165,233,0.14)", color: "#0369a1", fontWeight: 900, fontSize: 12 }}>
+                  {vsCards.length > 1 ? "VS デッキ" : "さいごの 1まい"}
+                </div>
+              )}
+              <div style={{ marginTop: 12, fontWeight: 900, fontSize: isNarrowScreen ? "1.15rem" : "1.28rem", color: "#0f172a", lineHeight: 1.4 }}>
+                {deckDisplayCard ? "ページが はじまると デッキの いちばんうえが めくられるよ！" : encouragementMessages[encouragementIndex]}
               </div>
-            );
-          })}
-        </div>
-
-      </div>
-
-      {/* 下部：議論開始 / 結果を見る */}
-      <div
-        style={{
-          position: "fixed",
-          left: 0,
-          right: 0,
-          bottom: 0,
-          paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 14px)",
-          paddingTop: 12,
-          paddingLeft: 16,
-          paddingRight: 16,
-          backgroundColor: "rgba(255,255,255,0.92)",
-          borderTop: "1px solid rgba(15,23,42,0.12)",
-          backdropFilter: "blur(8px)",
-          zIndex: 1200,
-        }}
-      >
-        <div style={{ width: "100%", maxWidth: "560px", margin: "0 auto" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <button
-              onClick={() => {
-                if (!selectedCardId) return;
-                startDiscussion(selectedCardId).catch(() => {});
-              }}
-              disabled={!canStartDiscussion}
-              style={{
-                width: "100%",
-                minHeight: 56,
-                borderRadius: 14,
-                border: "none",
-                backgroundColor: canStartDiscussion ? "#0ea5e9" : "#94a3b8",
-                color: "#fff",
-                fontWeight: 900,
-                cursor: canStartDiscussion ? "pointer" : "not-allowed",
-                fontSize: 18,
-              }}
-            >
-              議論を開始する
-            </button>
-
-            <div style={{ display: "flex", gap: 10, alignItems: "stretch" }}>
-              <button
-                onClick={() => {
-                  if (!canOpenResult) return;
-                  if (vsCount > 0) {
-                    setShowVsWarning(true);
-                    return;
-                  }
-                  router.push(`/room/${roomId}/result`);
-                }}
-                disabled={!canOpenResult}
-                style={{
-                  flex: "1 1 auto",
-                  width: "100%",
-                  minHeight: 56,
-                  borderRadius: 14,
-                  border: "none",
-                  backgroundColor: canOpenResult ? "#0f172a" : "#94a3b8",
-                  color: "#fff",
-                  fontWeight: 900,
-                  cursor: canOpenResult ? "pointer" : "not-allowed",
-                  fontSize: 18,
-                }}
-              >
-                結果を見る
-              </button>
-
-              <MapButton variant="inline" showLabel={false} />
+              <div style={{ marginTop: 10, borderRadius: 16, background: "rgba(255,255,255,0.84)", border: "1px solid rgba(148,163,184,0.26)", padding: "12px 14px" }}>
+                <div style={{ fontWeight: 900, fontSize: 12, color: "#64748b", marginBottom: 6 }}>つぎに はなす カード</div>
+                <div style={{ fontWeight: 900, color: "#0f172a", lineHeight: 1.45 }}>
+                  {deckDisplayCard ? getCardTitleText(deckDisplayCard.title) : "いまは ありません"}
+                </div>
+              </div>
             </div>
           </div>
-
-          {!selectedCardId && !canFinish && (
-            <div style={{ marginTop: 8, fontWeight: 900, fontSize: 12, color: "#64748b" }}>
-              カードをタップして選択してください
-            </div>
-          )}
-          {selectedCardId && !canFinish && (
-            <div style={{ marginTop: 8, fontWeight: 900, fontSize: 12, color: "#334155" }}>
-              選択中：{selectedCard?.title || selectedCardId}
-            </div>
-          )}
-          {!canFinish && vsCount > 0 && (
-            <div style={{ marginTop: 6, fontWeight: 900, fontSize: 12, color: "#b45309" }}>
-              VSが残っています（全て解消しないと終了できません）
-            </div>
-          )}
         </div>
+
       </div>
 
       {/* 3ページ目：議論モーダル（投票） */}
-      {phase === "voting" && stage === "discussion" && currentCard && !isCompactWindow && (
+      {discussionModalOpen && currentCard && (
         <div
           style={{
             position: "fixed",
@@ -1046,6 +1283,8 @@ export default function Mobile3Page() {
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
           }}
         >
           <div
@@ -1071,24 +1310,27 @@ export default function Mobile3Page() {
                 gap: 10,
               }}
             >
-              <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentCard.title}</div>
-              <button
-                onClick={() => setIsCompactWindow(true)}
-                style={{
-                  minHeight: 34,
-                  padding: "0 10px",
-                  borderRadius: 10,
-                  border: "1px solid rgba(15,23,42,0.14)",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontWeight: 900,
-                }}
-              >
-                小ウィンドウ化
-              </button>
+              <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getCardTitleText(currentCard.title)}</div>
+              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                <button
+                  onClick={() => setShowAllCardsModal(true)}
+                  style={{
+                    minHeight: 34,
+                    padding: "0 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(15,23,42,0.14)",
+                    background: "#fff",
+                    cursor: "pointer",
+                    fontWeight: 900,
+                  }}
+                >
+                  {getFuriganaText("全カード一覧")}
+                </button>
+                <MapButton variant="inline" showLabel={false} />
+              </div>
             </div>
 
-            <div style={{ flex: 1, overflowY: "auto" }}>
+            <div style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>
               <div
                 style={{
                   display: "grid",
@@ -1168,7 +1410,21 @@ export default function Mobile3Page() {
 
               <div style={{ width: "100%", overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
                 <div style={{ fontWeight: 900, color: "#0f172a", marginBottom: 10 }}>
-                  mobile2の振り分け（理由）
+                  {getFuriganaText("mobile2の振り分け（理由）")}
+                </div>
+                <div
+                  style={{
+                    marginBottom: 10,
+                    borderRadius: 12,
+                    padding: "10px 12px",
+                    background: "#eff6ff",
+                    border: "1px solid rgba(14,165,233,0.24)",
+                    fontWeight: 900,
+                    color: "#0f172a",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {getFuriganaText("全員で意見を合わせることでミッションを達成できるよ！")}
                 </div>
                 <div
                   style={{
@@ -1179,6 +1435,8 @@ export default function Mobile3Page() {
                     paddingRight: discussionRightColumns === 2 ? 0 : 4,
                     minHeight: 0,
                     alignContent: "start",
+                    overscrollBehavior: discussionRightColumns === 2 ? undefined : "contain",
+                    WebkitOverflowScrolling: discussionRightColumns === 2 ? undefined : "touch",
                   }}
                 >
                   {orderedParticipants.map((name) => {
@@ -1212,7 +1470,7 @@ export default function Mobile3Page() {
                               fontSize: 12,
                             }}
                           >
-                            {meta.label}
+                            {getFuriganaText(meta.label)}
                           </div>
                         </div>
 
@@ -1225,7 +1483,7 @@ export default function Mobile3Page() {
                             padding: discussionRightColumns === 2 ? "6px 8px" : "8px 10px",
                           }}
                         >
-                          <div style={{ fontWeight: 900, fontSize: 12, color: meta.color, marginBottom: discussionRightColumns === 2 ? 2 : 4 }}>理由</div>
+                          <div style={{ fontWeight: 900, fontSize: 12, color: meta.color, marginBottom: discussionRightColumns === 2 ? 2 : 4 }}>{getFuriganaText("理由")}</div>
                           <div
                             style={{
                               fontWeight: 900,
@@ -1259,7 +1517,7 @@ export default function Mobile3Page() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
                   gap: 12,
                 }}
               >
@@ -1276,22 +1534,7 @@ export default function Mobile3Page() {
                     fontSize: 18,
                   }}
                 >
-                  行く
-                </button>
-                <button
-                  onClick={() => castVote("neutral")}
-                  style={{
-                    minHeight: 56,
-                    borderRadius: 16,
-                    border: "none",
-                    background: "#fb923c",
-                    color: "#fff",
-                    fontWeight: 900,
-                    cursor: "pointer",
-                    fontSize: 18,
-                  }}
-                >
-                  保留
+                  行く！
                 </button>
                 <button
                   onClick={() => castVote("no")}
@@ -1306,59 +1549,31 @@ export default function Mobile3Page() {
                     fontSize: 18,
                   }}
                 >
-                  行かない
+                  行かない！
                 </button>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginTop: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginTop: 8 }}>
                 <div>{renderVoteAvatars("go")}</div>
-                <div>{renderVoteAvatars("neutral")}</div>
                 <div>{renderVoteAvatars("no")}</div>
               </div>
               <div style={{ marginTop: 10, fontWeight: 900, color: "#334155" }}>
-                あなたの投票：{myVote ? (myVote === "go" ? "行く" : myVote === "no" ? "行かない" : "保留") : "未投票"}
+                {getFuriganaText("あなたの投票")}：{myVote ? getFuriganaText(myVote === "go" ? "行く" : "行かない") : getFuriganaText("未投票")}
+              </div>
+              <div style={{ marginTop: 8, fontWeight: 900, color: consensusVote ? "#15803d" : "#334155", lineHeight: 1.6 }}>
+                {consensusVote
+                  ? getFuriganaText("みんなの意見がそろったよ！")
+                  : unvotedCount > 0
+                    ? (
+                        <>
+                          <span>{unvotedCount}</span>
+                          {getFuriganaText("人の投票を待っているよ")}
+                        </>
+                      )
+                    : getFuriganaText("まだ意見がそろっていないよ。話し合って合わせよう！")}
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* 小ウィンドウ化（3ページ目）：モーダルを閉じて左下にカード名＋戻す */}
-      {phase === "voting" && stage === "discussion" && currentCard && isCompactWindow && (
-        <div
-          style={{
-            position: "fixed",
-            left: 16,
-            bottom: "calc(env(safe-area-inset-bottom, 0px) + 92px)",
-            zIndex: 1950,
-            background: "rgba(255,255,255,0.95)",
-            border: "1px solid rgba(15,23,42,0.12)",
-            borderRadius: 14,
-            boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
-            padding: "10px 12px",
-            maxWidth: "min(320px, calc(100vw - 32px))",
-          }}
-        >
-          <div style={{ fontWeight: 900, fontSize: 12, color: "#334155", marginBottom: 6 }}>議論中</div>
-          <div style={{ fontWeight: 900, fontSize: 13, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {currentCard.title}
-          </div>
-          <button
-            onClick={() => setIsCompactWindow(false)}
-            style={{
-              marginTop: 8,
-              width: "100%",
-              minHeight: 36,
-              borderRadius: 10,
-              border: "none",
-              background: "#0f172a",
-              color: "#fff",
-              fontWeight: 900,
-              cursor: "pointer",
-            }}
-          >
-            戻す
-          </button>
         </div>
       )}
 
@@ -1374,6 +1589,8 @@ export default function Mobile3Page() {
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
           }}
         >
           <div
@@ -1387,10 +1604,12 @@ export default function Mobile3Page() {
             }}
           >
             <div style={{ fontWeight: 900, fontSize: 22, color: "#0f172a", marginTop: 10 }}>
-              {state.lastMove.title} は {statusLabel(state.lastMove.status)} に移動しました！
+              {getCardTitleText(state.lastMove.title)} のミッションは達成！
+              <br />
+              {getFuriganaText(state.lastMove.status === "go" ? "行く" : "行かない")}ことになったよ！
             </div>
             <button
-              onClick={() => setDismissedAfterVoteKey(afterVoteKey)}
+              onClick={handleAfterVoteClose}
               style={{
                 width: "100%",
                 marginTop: 22,
@@ -1410,6 +1629,91 @@ export default function Mobile3Page() {
         </div>
       )}
 
+      {showAllCardsModal && (
+        <div
+          onClick={() => setShowAllCardsModal(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,.72)",
+            zIndex: 2100,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(680px, calc(100% - 20px))",
+              background: "#fff",
+              borderRadius: 22,
+              boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+              overflow: "hidden",
+              maxHeight: "min(82dvh, 760px)",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid rgba(15,23,42,0.12)", gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: "1.2rem", color: "#0f172a" }}>{getFuriganaText("全カード一覧")}</div>
+                <div style={{ marginTop: 4, fontWeight: 900, fontSize: 12, color: "#475569" }}>いまの しわけを まとめて みられるよ</div>
+              </div>
+              <button
+                onClick={() => setShowAllCardsModal(false)}
+                style={{ minHeight: 40, padding: "0 12px", borderRadius: 12, border: "1px solid rgba(15,23,42,0.14)", background: "#fff", cursor: "pointer", fontWeight: 900 }}
+              >
+                {getFuriganaText("閉じる")}
+              </button>
+            </div>
+
+            <div style={{ padding: 14, display: "grid", gap: 12, overflowY: "auto", overscrollBehavior: "contain" }}>
+              {[
+                { key: "vs", label: "残りミッションカード", bg: "#f1f5f9", border: "#64748b", cards: vsCards },
+                { key: "go", label: "行く", bg: "#f0fdf4", border: "#16a34a", cards: (areaLists as any).go as typeof cards },
+                { key: "no", label: "行かない", bg: "#fef2f2", border: "#ef4444", cards: (areaLists as any).no as typeof cards },
+                { key: "neutral", label: "どちらでもいい", bg: "#fffbeb", border: "#f59e0b", cards: (areaLists as any).neutral as typeof cards },
+              ].map((section) => (
+                <div key={section.key} style={{ border: `2px solid ${section.border}`, background: section.bg, borderRadius: 18, padding: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ fontWeight: 900, color: "#0f172a" }}>{getFuriganaText(section.label)}</div>
+                    <div style={{ fontWeight: 900, color: "#0f172a" }}>{section.cards.length}</div>
+                  </div>
+
+                  {section.cards.length === 0 ? (
+                    <div style={{ fontWeight: 900, color: "#64748b", fontSize: 12 }}>（なし）</div>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: isNarrowScreen ? "repeat(2, minmax(0, 1fr))" : "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                      {section.cards.map((c) => (
+                        <button
+                          key={`${section.key}-${c.cardId}`}
+                          onClick={() => {
+                            setPreviewCardId(c.cardId);
+                            setPreviewIsBack(false);
+                          }}
+                          style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(15,23,42,0.14)", padding: 7, textAlign: "left", cursor: "pointer", boxShadow: "0 4px 14px rgba(15,23,42,0.08)" }}
+                        >
+                          <div style={{ width: "100%", aspectRatio: "3/4", borderRadius: 10, overflow: "hidden", background: "#f8fafc" }}>
+                            <img src={c.frontSrc} alt={c.title} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} draggable={false} />
+                          </div>
+                          <div style={{ marginTop: 6, fontWeight: 900, fontSize: 12, color: "#0f172a", lineHeight: 1.25, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any }}>
+                            {getCardTitleText(c.title)}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 配置カードのプレビュー（盤面確認用） */}
       {previewCard && (
         <div
@@ -1420,74 +1724,66 @@ export default function Mobile3Page() {
             position: "fixed",
             inset: 0,
             background: "rgba(15,23,42,.68)",
-            zIndex: 1800,
+            zIndex: 2200,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
           }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
               width: "min(520px, 100%)",
-              background: "#fff",
-              borderRadius: 16,
+              aspectRatio: "3 / 4",
+              borderRadius: 18,
               overflow: "hidden",
-              boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+              backgroundColor: "#f1f5f9",
+              position: "relative",
+              perspective: "1000px",
+              boxShadow: "0 22px 70px rgba(0,0,0,0.35)",
             }}
+            role="button"
+            tabIndex={0}
+            aria-label="カードをタップして表裏を切り替え"
           >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "12px 14px",
-                borderBottom: "1px solid rgba(15,23,42,0.12)",
-                fontWeight: 900,
-                gap: 10,
-              }}
-            >
-              <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{previewCard.title}</div>
-              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                <button
-                  onClick={() => {
-                    closePreview();
-                  }}
-                  style={{
-                    minHeight: 36,
-                    padding: "0 12px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(15,23,42,0.14)",
-                    background: "#fff",
-                    cursor: "pointer",
-                    fontWeight: 900,
-                  }}
-                >
-                  閉じる
-                </button>
-              </div>
-            </div>
-
             <div
               onClick={() => setPreviewIsBack((v) => !v)}
               style={{
                 width: "100%",
-                aspectRatio: "3/4",
-                background: "#f1f5f9",
+                height: "100%",
                 cursor: "pointer",
                 position: "relative",
               }}
-              role="button"
-              tabIndex={0}
-              aria-label="タップで表裏を切り替え"
             >
-              <img
-                src={previewIsBack ? previewCard.backSrc : previewCard.frontSrc}
-                alt={previewCard.title}
-                style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
-                draggable={false}
-              />
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  transformStyle: "preserve-3d",
+                  transition: "transform 260ms ease",
+                  transform: `rotateY(${previewIsBack ? 180 : 0}deg)`,
+                }}
+              >
+                <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden" }}>
+                  <img
+                    src={previewCard.frontSrc}
+                    alt={previewCard.title}
+                    style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
+                    draggable={false}
+                  />
+                </div>
+                <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}>
+                  <img
+                    src={previewCard.backSrc}
+                    alt={`${previewCard.title} 裏面`}
+                    style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
+                    draggable={false}
+                  />
+                </div>
+              </div>
               <div
                 style={{
                   position: "absolute",
@@ -1503,7 +1799,126 @@ export default function Mobile3Page() {
               >
                 タップで{previewIsBack ? "表" : "裏"}
               </div>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closePreview();
+                }}
+                style={{
+                  position: "absolute",
+                  top: 10,
+                  left: 10,
+                  minHeight: "40px",
+                  padding: "0 12px",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(255,255,255,0.35)",
+                  backgroundColor: "rgba(0,0,0,0.55)",
+                  color: "#fff",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                {getFuriganaText("閉じる")}
+              </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showMissionComplete && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 2300,
+            background: "radial-gradient(circle at top, rgba(253,224,71,0.32), rgba(15,23,42,0.86) 58%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            overflow: "hidden",
+          }}
+        >
+          {Array.from({ length: 18 }).map((_, index) => {
+            const colors = ["#22c55e", "#f97316", "#38bdf8", "#facc15", "#fb7185", "#a78bfa"];
+            return (
+              <div
+                key={`celebrate-${index}`}
+                style={{
+                  position: "absolute",
+                  top: `${18 + (index % 6) * 10}%`,
+                  left: `${8 + (index % 9) * 10}%`,
+                  width: index % 3 === 0 ? 18 : 12,
+                  height: index % 3 === 0 ? 18 : 12,
+                  borderRadius: index % 2 === 0 ? 9999 : 4,
+                  background: colors[index % colors.length],
+                  opacity: 0.9,
+                  ['--driftX' as any]: `${(index % 2 === 0 ? 1 : -1) * (40 + (index % 4) * 18)}px`,
+                  ['--driftY' as any]: `${180 + (index % 5) * 26}px`,
+                  ['--spin' as any]: `${index % 2 === 0 ? 240 : -240}deg`,
+                  animation: `mobile3CelebrateFloat ${1.8 + (index % 4) * 0.24}s ease-out infinite`,
+                  animationDelay: `${index * 0.06}s`,
+                }}
+              />
+            );
+          })}
+
+          <div
+            style={{
+              position: "absolute",
+              width: 240,
+              height: 240,
+              borderRadius: "50%",
+              background: "radial-gradient(circle, rgba(255,255,255,0.92), rgba(255,255,255,0) 68%)",
+              animation: "mobile3CelebratePulse 1.8s ease-out infinite",
+              pointerEvents: "none",
+            }}
+          />
+
+          <div
+            style={{
+              position: "relative",
+              zIndex: 2,
+              width: "min(560px, 100%)",
+              borderRadius: 28,
+              background: "linear-gradient(180deg, #ffffff 0%, #fefce8 100%)",
+              border: "3px solid rgba(250,204,21,0.68)",
+              boxShadow: "0 30px 90px rgba(0,0,0,0.34)",
+              padding: "28px 20px",
+              textAlign: "center",
+            }}
+          >
+            <div style={{ fontWeight: 900, fontSize: "clamp(2rem, 8vw, 3rem)", color: "#ca8a04", lineHeight: 1.15 }}>
+              {getFuriganaText("全ミッション達成！")}
+            </div>
+            {showResultCta && (
+              <button
+                onClick={() => {
+                  if (!canOpenResult) return;
+                  router.push(`/room/${roomId}/result`);
+                }}
+                style={{
+                  width: "100%",
+                  minHeight: 56,
+                  marginTop: 22,
+                  borderRadius: 16,
+                  border: "none",
+                  background: "linear-gradient(135deg, #16a34a, #15803d)",
+                  color: "#fff",
+                  fontWeight: 900,
+                  cursor: canOpenResult ? "pointer" : "not-allowed",
+                  fontSize: 20,
+                  boxShadow: "0 18px 38px rgba(22,163,74,0.28)",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                  <span>{getFuriganaText("結果を見る")}</span>
+                  <span style={{ fontSize: 24, lineHeight: 1 }} aria-hidden="true">&gt;</span>
+                </span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1521,6 +1936,8 @@ export default function Mobile3Page() {
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
           }}
         >
           <div
@@ -1547,7 +1964,7 @@ export default function Mobile3Page() {
                 gap: 10,
               }}
             >
-              <div style={{ fontWeight: 900, color: "#0f172a" }}>mobile2の最終結果</div>
+              <div style={{ fontWeight: 900, color: "#0f172a" }}>{getFuriganaText("mobile2の最終結果")}</div>
               <button
                 onClick={() => setShowSubmittedResults(false)}
                 style={{
@@ -1564,7 +1981,7 @@ export default function Mobile3Page() {
               </button>
             </div>
 
-            <div style={{ padding: 14, overflow: "auto" }}>
+            <div style={{ padding: 14, overflow: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>
               {submittedSelections.length === 0 ? (
                 <div style={{ fontWeight: 900, color: "#64748b" }}>（まだ提出結果がありません）</div>
               ) : (
@@ -1576,7 +1993,7 @@ export default function Mobile3Page() {
                   const renderRow = (u: { userName: string }, label: string, ids: string[], bg: string) => (
                     <div style={{ borderRadius: 14, border: "1px solid rgba(15,23,42,0.12)", overflow: "hidden" }}>
                       <div style={{ padding: "8px 10px", fontWeight: 900, background: bg, color: "#0f172a" }}>
-                        {label}（{ids.length}）
+                        {getFuriganaText(label)}（{ids.length}）
                       </div>
                       <div style={{ padding: 10 }}>
                         {ids.length === 0 ? (
@@ -1618,7 +2035,7 @@ export default function Mobile3Page() {
                                       WebkitBoxOrient: "vertical" as any,
                                     }}
                                   >
-                                    {card.title}
+                                    {getCardTitleText(card.title)}
                                   </div>
                                 </div>
                               );
@@ -1672,6 +2089,8 @@ export default function Mobile3Page() {
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
           }}
         >
           <div
@@ -1685,7 +2104,7 @@ export default function Mobile3Page() {
               textAlign: "center",
             }}
           >
-            <div style={{ fontWeight: 900, fontSize: 20, color: "#0f172a" }}>VSのカードを議論しましょう</div>
+            <div style={{ fontWeight: 900, fontSize: 20, color: "#0f172a" }}>VSのカードを ぎろんしましょう</div>
             <div style={{ marginTop: 10, fontWeight: 900, color: "#334155" }}>まだVSが {vsCount} 枚残っています</div>
             <button
               onClick={() => setShowVsWarning(false)}
