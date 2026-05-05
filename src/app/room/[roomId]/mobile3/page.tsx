@@ -1028,6 +1028,8 @@ export default function Mobile3Page() {
         boxSizing: "border-box",
         fontFamily: "Arial, sans-serif",
         overscrollBehavior: "none",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <style>{`
@@ -1069,206 +1071,253 @@ export default function Mobile3Page() {
         </div>
       )}
 
-      <div style={{ width: "100%", maxWidth: "560px", margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8 }}>
-          <div style={{ minWidth: 0 }}>
+      <div
+        style={{
+          flex: 1,
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div style={{ width: "100%", maxWidth: isNarrowScreen ? "560px" : "640px", margin: "0 auto" }}>
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", gap: 12, marginBottom: 8, textAlign: "center" }}>
+            <div style={{ minWidth: 0, maxWidth: 520 }}>
             <div style={{ fontWeight: 900, fontSize: "1.35rem", color: "#0f172a" }}>{getFuriganaText("ミッション！")}</div>
             <div style={{ marginTop: 6, fontWeight: 900, color: "#334155", lineHeight: 1.6 }}>
               {getFuriganaText("意見が分かれているカードを話し合って解決しよう！")}
             </div>
           </div>
 
-        </div>
+          </div>
 
-        <div
-          style={{
-            marginTop: 12,
-            borderRadius: 24,
-            border: "2px solid rgba(14,165,233,0.18)",
-            background: "linear-gradient(180deg, #eff6ff 0%, #ffffff 56%, #f8fafc 100%)",
-            boxShadow: "0 18px 46px rgba(14,165,233,0.12)",
-            padding: 16,
-            overflow: "hidden",
-          }}
-        >
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: isNarrowScreen ? "148px minmax(0, 1fr)" : "188px minmax(0, 1fr)",
-              gap: 14,
-              alignItems: "center",
+              marginTop: 12,
+              borderRadius: 24,
+              border: "2px solid rgba(14,165,233,0.18)",
+              background: "linear-gradient(180deg, #eff6ff 0%, #ffffff 56%, #f8fafc 100%)",
+              boxShadow: "0 18px 46px rgba(14,165,233,0.12)",
+              padding: 16,
+              overflow: "hidden",
             }}
           >
             <div
               style={{
-                position: "relative",
-                width: "100%",
-                aspectRatio: "3 / 4.2",
-                display: "flex",
+                display: "grid",
+                gridTemplateColumns: isNarrowScreen ? "148px minmax(0, 1fr)" : "200px minmax(0, 1fr)",
+                gap: isNarrowScreen ? 14 : 18,
                 alignItems: "center",
-                justifyContent: "center",
               }}
             >
-              {deckDisplayCard ? (
-                <>
-                  {Array.from({ length: deckRevealCardId ? Math.max(Math.min(vsCards.length, 4) - 1, 0) : Math.min(vsCards.length, 4) }).map((_, index) => {
-                    const reverseIndex = (deckRevealCardId ? Math.max(Math.min(vsCards.length, 4) - 1, 0) : Math.min(vsCards.length, 4)) - index - 1;
-                    return (
+              <div
+                style={{
+                  position: "relative",
+                  width: "100%",
+                  aspectRatio: "3 / 4.2",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {deckDisplayCard ? (
+                  <>
+                    {Array.from({ length: deckRevealCardId ? Math.max(Math.min(vsCards.length, 4) - 1, 0) : Math.min(vsCards.length, 4) }).map((_, index) => {
+                      const reverseIndex = (deckRevealCardId ? Math.max(Math.min(vsCards.length, 4) - 1, 0) : Math.min(vsCards.length, 4)) - index - 1;
+                      return (
+                        <div
+                          key={`deck-layer-${index}`}
+                          style={{
+                            position: "absolute",
+                            inset: `${12 + reverseIndex * 5}px ${18 + reverseIndex * 3}px ${18 - reverseIndex * 3}px ${12 - reverseIndex * 2}px`,
+                            borderRadius: 18,
+                            overflow: "hidden",
+                            background: "linear-gradient(180deg, #e2e8f0 0%, #cbd5e1 100%)",
+                            border: "2px solid rgba(100,116,139,0.24)",
+                            boxShadow: "0 10px 24px rgba(15,23,42,0.12)",
+                          }}
+                        >
+                          <img
+                            src={deckDisplayCard.backSrc}
+                            alt="VSデッキ"
+                            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", opacity: 0.96 }}
+                            draggable={false}
+                          />
+                        </div>
+                      );
+                    })}
+
+                    {deckRevealCard && (
                       <div
-                        key={`deck-layer-${index}`}
                         style={{
                           position: "absolute",
-                          inset: `${12 + reverseIndex * 5}px ${18 + reverseIndex * 3}px ${18 - reverseIndex * 3}px ${12 - reverseIndex * 2}px`,
-                          borderRadius: 18,
-                          overflow: "hidden",
-                          background: "linear-gradient(180deg, #e2e8f0 0%, #cbd5e1 100%)",
-                          border: "2px solid rgba(100,116,139,0.24)",
-                          boxShadow: "0 10px 24px rgba(15,23,42,0.12)",
+                          inset: 8,
+                          perspective: "1200px",
+                          transform: deckRevealFlipped ? "translate(12%, -18%) scale(1.02)" : "translate(0, 0)",
+                          transition: "transform 680ms cubic-bezier(0.22, 1, 0.36, 1)",
+                          zIndex: 5,
                         }}
                       >
-                        <img
-                          src={deckDisplayCard.backSrc}
-                          alt="VSデッキ"
-                          style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", opacity: 0.96 }}
-                          draggable={false}
-                        />
+                        <div
+                          style={{
+                            position: "relative",
+                            width: "100%",
+                            height: "100%",
+                            transformStyle: "preserve-3d",
+                            transform: `rotateY(${deckRevealFlipped ? 180 : 0}deg)`,
+                            transition: "transform 640ms cubic-bezier(0.22, 1, 0.36, 1)",
+                            boxShadow: "0 24px 50px rgba(14,165,233,0.22)",
+                            borderRadius: 20,
+                          }}
+                        >
+                          <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", borderRadius: 20, overflow: "hidden", background: "#dbeafe" }}>
+                            <img src={deckRevealCard.backSrc} alt="VSデッキ" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} draggable={false} />
+                          </div>
+                          <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", transform: "rotateY(180deg)", borderRadius: 20, overflow: "hidden", background: "#fff" }}>
+                            <img src={deckRevealCard.frontSrc} alt={deckRevealCard.title} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} draggable={false} />
+                          </div>
+                        </div>
                       </div>
-                    );
-                  })}
+                    )}
 
-                  {deckRevealCard && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 8,
-                        perspective: "1200px",
-                        transform: deckRevealFlipped ? "translate(12%, -18%) scale(1.02)" : "translate(0, 0)",
-                        transition: "transform 680ms cubic-bezier(0.22, 1, 0.36, 1)",
-                        zIndex: 5,
-                      }}
-                    >
+                    {!deckRevealCard && (
                       <div
                         style={{
-                          position: "relative",
-                          width: "100%",
-                          height: "100%",
-                          transformStyle: "preserve-3d",
-                          transform: `rotateY(${deckRevealFlipped ? 180 : 0}deg)`,
-                          transition: "transform 640ms cubic-bezier(0.22, 1, 0.36, 1)",
-                          boxShadow: "0 24px 50px rgba(14,165,233,0.22)",
+                          position: "absolute",
+                          inset: 8,
                           borderRadius: 20,
+                          overflow: "hidden",
+                          background: "#dbeafe",
+                          border: "2px solid rgba(14,165,233,0.22)",
+                          boxShadow: "0 20px 46px rgba(14,165,233,0.18)",
                         }}
                       >
-                        <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", borderRadius: 20, overflow: "hidden", background: "#dbeafe" }}>
-                          <img src={deckRevealCard.backSrc} alt="VSデッキ" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} draggable={false} />
-                        </div>
-                        <div style={{ position: "absolute", inset: 0, backfaceVisibility: "hidden", transform: "rotateY(180deg)", borderRadius: 20, overflow: "hidden", background: "#fff" }}>
-                          <img src={deckRevealCard.frontSrc} alt={deckRevealCard.title} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} draggable={false} />
-                        </div>
+                        <img src={deckDisplayCard.backSrc} alt="VSデッキ" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} draggable={false} />
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {!deckRevealCard && (
                     <div
                       style={{
                         position: "absolute",
-                        inset: 8,
-                        borderRadius: 20,
-                        overflow: "hidden",
-                        background: "#dbeafe",
-                        border: "2px solid rgba(14,165,233,0.22)",
-                        boxShadow: "0 20px 46px rgba(14,165,233,0.18)",
+                        top: 2,
+                        right: 4,
+                        minWidth: 44,
+                        height: 44,
+                        borderRadius: 9999,
+                        background: "#0f172a",
+                        color: "#fff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 900,
+                        fontSize: "1rem",
+                        boxShadow: "0 12px 30px rgba(15,23,42,0.22)",
+                        zIndex: 7,
                       }}
                     >
-                      <img src={deckDisplayCard.backSrc} alt="VSデッキ" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} draggable={false} />
+                      {vsCards.length}
                     </div>
-                  )}
-
+                  </>
+                ) : (
                   <div
                     style={{
-                      position: "absolute",
-                      top: 2,
-                      right: 4,
-                      minWidth: 44,
-                      height: 44,
-                      borderRadius: 9999,
-                      background: "#0f172a",
-                      color: "#fff",
+                      width: "100%",
+                      height: "100%",
+                      borderRadius: 20,
+                      border: "2px dashed rgba(100,116,139,0.34)",
+                      background: "rgba(255,255,255,0.78)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
+                      textAlign: "center",
+                      padding: 12,
                       fontWeight: 900,
-                      fontSize: "1rem",
-                      boxShadow: "0 12px 30px rgba(15,23,42,0.22)",
-                      zIndex: 7,
+                      color: "#64748b",
+                      lineHeight: 1.5,
                     }}
                   >
-                    {vsCards.length}
+                    VS するカードは<br />ありません
                   </div>
-                </>
-              ) : (
+                )}
+              </div>
+
+              <div style={{ minWidth: 0, display: "flex", flexDirection: "column", alignItems: isNarrowScreen ? "flex-start" : "center", textAlign: isNarrowScreen ? "left" : "center" }}>
+                {vsCards.length === 0 ? (
+                  <button
+                    onClick={openMissionCompleteOverlay}
+                    disabled={initialVsCount <= 0 || showMissionComplete}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 12px",
+                      borderRadius: 9999,
+                      background: showMissionComplete ? "rgba(250,204,21,0.18)" : "rgba(14,165,233,0.14)",
+                      color: showMissionComplete ? "#a16207" : "#0369a1",
+                      fontWeight: 900,
+                      fontSize: 12,
+                      border: "1px solid rgba(14,165,233,0.16)",
+                      cursor: initialVsCount > 0 && !showMissionComplete ? "pointer" : "default",
+                    }}
+                  >
+                    クリア
+                  </button>
+                ) : (
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 9999, background: "rgba(14,165,233,0.14)", color: "#0369a1", fontWeight: 900, fontSize: 12 }}>
+                    {vsCards.length > 1 ? "VS デッキ" : "さいごの 1まい"}
+                  </div>
+                )}
+                <div style={{ marginTop: 12, fontWeight: 900, fontSize: isNarrowScreen ? "1.15rem" : "1.28rem", color: "#0f172a", lineHeight: 1.4, maxWidth: 320 }}>
+                  {deckDisplayCard ? "ページが はじまると デッキの いちばんうえが めくられるよ！" : encouragementMessages[encouragementIndex]}
+                </div>
                 <div
                   style={{
-                    width: "100%",
-                    height: "100%",
-                    borderRadius: 20,
-                    border: "2px dashed rgba(100,116,139,0.34)",
-                    background: "rgba(255,255,255,0.78)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    textAlign: "center",
-                    padding: 12,
-                    fontWeight: 900,
-                    color: "#64748b",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  VS するカードは<br />ありません
-                </div>
-              )}
-            </div>
-
-            <div style={{ minWidth: 0 }}>
-              {vsCards.length === 0 ? (
-                <button
-                  onClick={openMissionCompleteOverlay}
-                  disabled={initialVsCount <= 0 || showMissionComplete}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
+                    marginTop: 10,
+                    display: "grid",
+                    gridTemplateColumns: isNarrowScreen ? "1fr" : "repeat(2, minmax(0, 1fr))",
                     gap: 8,
-                    padding: "6px 12px",
-                    borderRadius: 9999,
-                    background: showMissionComplete ? "rgba(250,204,21,0.18)" : "rgba(14,165,233,0.14)",
-                    color: showMissionComplete ? "#a16207" : "#0369a1",
-                    fontWeight: 900,
-                    fontSize: 12,
-                    border: "1px solid rgba(14,165,233,0.16)",
-                    cursor: initialVsCount > 0 && !showMissionComplete ? "pointer" : "default",
+                    width: "100%",
                   }}
                 >
-                  クリア
-                </button>
-              ) : (
-                <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 9999, background: "rgba(14,165,233,0.14)", color: "#0369a1", fontWeight: 900, fontSize: 12 }}>
-                  {vsCards.length > 1 ? "VS デッキ" : "さいごの 1まい"}
+                  <div
+                    style={{
+                      borderRadius: 14,
+                      background: "rgba(14,165,233,0.08)",
+                      border: "1px solid rgba(14,165,233,0.18)",
+                      padding: "10px 12px",
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, fontSize: 11, color: "#0369a1", marginBottom: 4 }}>みるポイント</div>
+                    <div style={{ fontWeight: 900, color: "#0f172a", lineHeight: 1.5, fontSize: 13 }}>
+                      みんなの{getFuriganaText("振り分け理由")}を見て、どうするか決めよう！
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      borderRadius: 14,
+                      background: "rgba(248,250,252,0.96)",
+                      border: "1px solid rgba(148,163,184,0.22)",
+                      padding: "10px 12px",
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, fontSize: 11, color: "#64748b", marginBottom: 4 }}>すすみ方</div>
+                    <div style={{ fontWeight: 900, color: "#0f172a", lineHeight: 1.5, fontSize: 13 }}>
+                      デッキをめくって、カードごとに話し合いを進めるよ！
+                    </div>
+                  </div>
                 </div>
-              )}
-              <div style={{ marginTop: 12, fontWeight: 900, fontSize: isNarrowScreen ? "1.15rem" : "1.28rem", color: "#0f172a", lineHeight: 1.4 }}>
-                {deckDisplayCard ? "ページが はじまると デッキの いちばんうえが めくられるよ！" : encouragementMessages[encouragementIndex]}
-              </div>
-              <div style={{ marginTop: 10, borderRadius: 16, background: "rgba(255,255,255,0.84)", border: "1px solid rgba(148,163,184,0.26)", padding: "12px 14px" }}>
-                <div style={{ fontWeight: 900, fontSize: 12, color: "#64748b", marginBottom: 6 }}>つぎに はなす カード</div>
-                <div style={{ fontWeight: 900, color: "#0f172a", lineHeight: 1.45 }}>
-                  {deckDisplayCard ? getCardTitleText(deckDisplayCard.title) : "いまは ありません"}
+                <div style={{ marginTop: 10, borderRadius: 16, background: "rgba(255,255,255,0.84)", border: "1px solid rgba(148,163,184,0.26)", padding: "12px 14px", width: "100%" }}>
+                  <div style={{ fontWeight: 900, fontSize: 12, color: "#64748b", marginBottom: 6 }}>つぎに はなす カード</div>
+                  <div style={{ fontWeight: 900, color: "#0f172a", lineHeight: 1.45 }}>
+                    {deckDisplayCard ? getCardTitleText(deckDisplayCard.title) : "いまは ありません"}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
+
+      </div>
       </div>
 
       {/* 3ページ目：議論モーダル（投票） */}
@@ -1410,7 +1459,7 @@ export default function Mobile3Page() {
 
               <div style={{ width: "100%", overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
                 <div style={{ fontWeight: 900, color: "#0f172a", marginBottom: 10 }}>
-                  {getFuriganaText("mobile2の振り分け（理由）")}
+                  {getFuriganaText("振り分け理由")}
                 </div>
                 <div
                   style={{

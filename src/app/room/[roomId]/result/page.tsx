@@ -60,6 +60,7 @@ export default function ResultPage() {
   const { roomId } = useParams();
   const { userName: currentUserName } = useUser();
   const [isNarrowScreen, setIsNarrowScreen] = useState(false);
+  const [isTabletScreen, setIsTabletScreen] = useState(false);
   const [selections, setSelections] = useState<UserSelection[]>([]);
   const [goIds, setGoIds] = useState<string[]>([]);
   const [noIds, setNoIds] = useState<string[]>([]);
@@ -81,7 +82,11 @@ export default function ResultPage() {
 
   // スマホ幅判定
   useEffect(() => {
-    const update = () => setIsNarrowScreen(window.innerWidth <= 420);
+    const update = () => {
+      const width = window.innerWidth;
+      setIsNarrowScreen(width <= 420);
+      setIsTabletScreen(width > 420 && width <= 1024);
+    };
     update();
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
@@ -356,7 +361,7 @@ export default function ResultPage() {
     return (
       <div
         key={cardId}
-        style={{ width: isNarrowScreen ? '100%' : 180, flex: '0 0 auto', border: '1px solid #e5e7eb', background: '#fff', borderRadius: 10, padding: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4 }}
+        style={{ width: isNarrowScreen ? '100%' : isTabletScreen ? 156 : 180, flex: '0 0 auto', border: '1px solid #e5e7eb', background: '#fff', borderRadius: 10, padding: isTabletScreen ? 7 : 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 4 }}
         onClick={() => setCardModal(cardId)}
       >
         <div style={{ width: '100%', aspectRatio: '3/2', background: '#f8fafc', borderRadius: 10, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -364,7 +369,7 @@ export default function ResultPage() {
         </div>
         <div
           style={{
-            fontSize: 11,
+            fontSize: isTabletScreen ? 10 : 11,
             fontWeight: 700,
             color: '#111827',
             overflow: 'hidden',
@@ -383,7 +388,7 @@ export default function ResultPage() {
           {users.map(u => {
             const style = categoryChipStyle[u.category] || categoryChipStyle.neutral;
             return (
-              <div key={u.userId} style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}`, borderRadius: 9999, padding: '1px 5px', fontSize: 9, fontWeight: 700 }}>{u.userName}</div>
+              <div key={u.userId} style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}`, borderRadius: 9999, padding: isTabletScreen ? '1px 4px' : '1px 5px', fontSize: isTabletScreen ? 8 : 9, fontWeight: 700 }}>{u.userName}</div>
             );
           })}
         </div>
@@ -395,10 +400,12 @@ export default function ResultPage() {
   const openNo = isNarrowScreen ? true : !!expanded.no;
   const openNeutral = isNarrowScreen ? true : !!expanded.neutral;
   const openVs = isNarrowScreen ? true : !!expanded.vs;
+  const sectionHeight = isNarrowScreen ? 'auto' : isTabletScreen ? 212 : 240;
+  const desktopCardGap = isTabletScreen ? 10 : 14;
 
   return (
     <div style={{ minHeight: '100dvh', background: '#ffffff', padding: `calc(env(safe-area-inset-top, 0px) + 20px) ${isNarrowScreen ? 10 : 12}px calc(env(safe-area-inset-bottom, 0px) + 20px)`, fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ maxWidth: 1180, margin: '0 auto' }}>
+      <div style={{ maxWidth: isTabletScreen ? 960 : 1180, margin: '0 auto' }}>
         {/* ヘッダー行 */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', width: isNarrowScreen ? '100%' : 'auto' }}>
@@ -453,14 +460,14 @@ export default function ResultPage() {
         </div>
 
         <div style={{ marginBottom: 20, textAlign: 'center' }}>
-          <h1 style={{ fontSize: isNarrowScreen ? 24 : 32, fontWeight: 900, letterSpacing: '.5px', margin: 0, color: '#0f172a' }}>{getFuriganaText('最終結果')}</h1>
-          <div style={{ marginTop: 8, color: '#475569', fontSize: 14 }}>{getFuriganaText('参加者')}: {participantsSummary || '—'}</div>
+          <h1 style={{ fontSize: isNarrowScreen ? 24 : isTabletScreen ? 28 : 32, fontWeight: 900, letterSpacing: '.5px', margin: 0, color: '#0f172a' }}>{getFuriganaText('最終結果')}</h1>
+          <div style={{ marginTop: 8, color: '#475569', fontSize: isTabletScreen ? 13 : 14 }}>{getFuriganaText('参加者')}: {participantsSummary || '—'}</div>
           {/* 合致率表示を削除 */}
         </div>
 
         {/* 合致度サマリーエリア */}
         {matchAnalysis.length > 0 && (
-          <div style={{ margin: '0 auto 32px', maxWidth: 900, background: 'linear-gradient(135deg,#f0fdf4,#ffffff)', border: '2px solid #10b981', borderRadius: 18, padding: '14px 18px', boxShadow: '0 6px 18px -8px rgba(16,185,129,0.15)' }}>
+          <div style={{ margin: '0 auto 32px', maxWidth: isTabletScreen ? 820 : 900, background: 'linear-gradient(135deg,#f0fdf4,#ffffff)', border: '2px solid #10b981', borderRadius: 18, padding: isTabletScreen ? '12px 14px' : '14px 18px', boxShadow: '0 6px 18px -8px rgba(16,185,129,0.15)' }}>
             <div style={{ fontSize: 13, fontWeight: 800, color: '#065f46', marginBottom: 12, letterSpacing: '.5px' }}>{getFuriganaText('合致度サマリー')}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {matchAnalysis.map((match) => {
@@ -468,8 +475,8 @@ export default function ResultPage() {
                   p.userAId === match.userId || p.userBId === match.userId
                 );
                 return (
-                  <div key={match.userId} style={{ background: '#fff', border: '1px solid #6ee7b7', borderRadius: 12, padding: '12px 16px' }}>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 8 }}>{match.userName}</div>
+                    <div key={match.userId} style={{ background: '#fff', border: '1px solid #6ee7b7', borderRadius: 12, padding: isTabletScreen ? '10px 12px' : '12px 16px' }}>
+                    <div style={{ fontSize: isTabletScreen ? 12 : 13, fontWeight: 800, color: '#0f172a', marginBottom: 8 }}>{match.userName}</div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {userPairs.length > 0 ? (
                         userPairs.map((pair) => {
@@ -481,8 +488,8 @@ export default function ResultPage() {
                                 background: '#f9fafb', 
                                 border: '1px solid #d1d5db', 
                                 borderRadius: 8, 
-                                padding: '8px 12px',
-                                fontSize: 12,
+                                padding: isTabletScreen ? '7px 10px' : '8px 12px',
+                                fontSize: isTabletScreen ? 11 : 12,
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: 8
@@ -505,7 +512,7 @@ export default function ResultPage() {
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: isNarrowScreen ? 16 : 28 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: isNarrowScreen ? 16 : isTabletScreen ? 22 : 28 }}>
           {/* 行く（柔らかい赤） */}
           <div style={{ border: '2px solid #fca5a5', background: '#fee2e2', borderRadius: 18, boxShadow: '0 10px 28px -10px rgba(252,165,165,0.5)' }}>
             <div
@@ -523,13 +530,13 @@ export default function ResultPage() {
                 <div style={{ transform: openGo ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#991b1b' }}>^</div>
               )}
             </div>
-            <div style={{ height: openGo ? (isNarrowScreen ? 'auto' : 240) : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openGo ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openGo ? '1px solid rgba(252,165,165,0.4)' : 'none', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : '10px 14px 20px' }}>
+            <div style={{ height: openGo ? sectionHeight : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openGo ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openGo ? '1px solid rgba(252,165,165,0.4)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : isTabletScreen ? '10px 12px 16px' : '10px 14px 20px' }}>
                 <div
                   style={
                     isNarrowScreen
                       ? { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }
-                      : { display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }
+                      : { display: 'flex', gap: desktopCardGap, overflowX: 'auto', paddingBottom: 6 }
                   }
                 >
                   {(uniqueSectionCards.go?.length || 0) > 0 ? uniqueSectionCards.go!.map(renderCard) : (
@@ -557,13 +564,13 @@ export default function ResultPage() {
                 <div style={{ transform: openNo ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#1e40af' }}>^</div>
               )}
             </div>
-            <div style={{ height: openNo ? (isNarrowScreen ? 'auto' : 240) : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openNo ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openNo ? '1px solid rgba(147,197,253,0.4)' : 'none', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : '10px 14px 20px' }}>
+            <div style={{ height: openNo ? sectionHeight : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openNo ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openNo ? '1px solid rgba(147,197,253,0.4)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : isTabletScreen ? '10px 12px 16px' : '10px 14px 20px' }}>
                 <div
                   style={
                     isNarrowScreen
                       ? { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }
-                      : { display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }
+                      : { display: 'flex', gap: desktopCardGap, overflowX: 'auto', paddingBottom: 6 }
                   }
                 >
                   {(uniqueSectionCards.no?.length || 0) > 0 ? uniqueSectionCards.no!.map(renderCard) : (
@@ -591,13 +598,13 @@ export default function ResultPage() {
                 <div style={{ transform: openNeutral ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#374151' }}>^</div>
               )}
             </div>
-            <div style={{ height: openNeutral ? (isNarrowScreen ? 'auto' : 240) : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openNeutral ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openNeutral ? '1px solid rgba(156,163,175,0.3)' : 'none', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : '10px 14px 20px' }}>
+            <div style={{ height: openNeutral ? sectionHeight : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openNeutral ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openNeutral ? '1px solid rgba(156,163,175,0.3)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : isTabletScreen ? '10px 12px 16px' : '10px 14px 20px' }}>
                 <div
                   style={
                     isNarrowScreen
                       ? { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }
-                      : { display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }
+                      : { display: 'flex', gap: desktopCardGap, overflowX: 'auto', paddingBottom: 6 }
                   }
                 >
                   {(uniqueSectionCards.neutral?.length || 0) > 0 ? uniqueSectionCards.neutral!.map(renderCard) : (
@@ -625,13 +632,13 @@ export default function ResultPage() {
                 <div style={{ transform: openVs ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .25s', fontSize: 20, color: '#9a3412' }}>^</div>
               )}
             </div>
-            <div style={{ height: openVs ? (isNarrowScreen ? 'auto' : 240) : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openVs ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openVs ? '1px solid rgba(253,186,116,0.45)' : 'none', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : '10px 14px 20px' }}>
+            <div style={{ height: openVs ? sectionHeight : 0, transition: isNarrowScreen ? 'none' : 'height .35s ease', overflow: openVs ? (isNarrowScreen ? 'visible' : 'hidden') : 'hidden', borderTop: openVs ? '1px solid rgba(253,186,116,0.45)' : 'none', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: isNarrowScreen ? '12px 12px 14px' : isTabletScreen ? '10px 12px 16px' : '10px 14px 20px' }}>
                 <div
                   style={
                     isNarrowScreen
                       ? { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }
-                      : { display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 }
+                      : { display: 'flex', gap: desktopCardGap, overflowX: 'auto', paddingBottom: 6 }
                   }
                 >
                   {(uniqueSectionCards.vs?.length || 0) > 0 ? uniqueSectionCards.vs!.map(renderCard) : (

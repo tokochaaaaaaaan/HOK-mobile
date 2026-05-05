@@ -66,6 +66,13 @@ const phraseMap: Record<string, FuriganaPart[]> = {
   ],
   "付箋": [{ base: "付箋", reading: "ふせん" }],
   "理由": [{ base: "理由", reading: "りゆう" }],
+  "振り分け理由": [
+    { base: "振", reading: "ふ" },
+    { base: "り" },
+    { base: "分", reading: "わ" },
+    { base: "け" },
+    { base: "理由", reading: "りゆう" },
+  ],
   "理由（付箋）": [
     { base: "理由", reading: "りゆう" },
     { base: "（" },
